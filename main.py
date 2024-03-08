@@ -7,6 +7,7 @@ import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 
+from keep_alive import keep_alive
 from src.Cogs.Gemini import Gemini
 from src.Cogs.RoleOperation import RoleOperation
 
@@ -41,6 +42,6 @@ async def setup():
     await bot.add_cog(RoleOperation(bot, logger))
     await bot.start(discord_api_key)
 
-
+keep_alive()
 loop = asyncio.get_event_loop()
 loop.run_until_complete(setup())
