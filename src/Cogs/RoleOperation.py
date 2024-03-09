@@ -1,7 +1,9 @@
 import re
 
 import discord
+from discord import app_commands
 from discord.ext import commands
+from typing import Literal, Optional
 
 
 class RoleOperation(commands.Cog):
@@ -64,6 +66,54 @@ class RoleOperation(commands.Cog):
             await self.remove_role(message.guild, author, 'Infant')
             await self.log_channel.send(
                 f'{author.mention} said their first word! They are Toddler now! {message.jump_url}')
+
+    @app_commands.command(name="shutdown", description="Shutting down the bot.")
+    @app_commands.guilds(1030501230797131887)
+    async def shutdown(self, interaction: discord.Interaction):
+        self.logger.info(f"Shutting down the bot")
+        await self.log_channel.send(f"Shutting down the bot")
+        await self.bot.close()
+
+    @commands.command()
+    @commands.guild_only()
+    @commands.is_owner()
+    async def sync(self, ctx: commands.Context, guilds: commands.Greedy[discord.Object],
+                   spec: Optional[Literal["~", "*", "^"]] = None) -> None:
+        async with ctx.typing():
+            if not guilds:
+                if spec == "~":
+                    self.logger.info(f"Syncing the tree to the current guild")
+                    synced = await ctx.bot.tree.sync(guild=ctx.guild)
+                elif spec == "*":
+                    self.logger.info(f"Syncing the tree globally")
+                    ctx.bot.tree.copy_global_to(guild=ctx.guild)
+                    synced = await ctx.bot.tree.sync(guild=ctx.guild)
+                elif spec == "^":
+                    self.logger.info(f"Clearing the tree to the current guild and syncing it.")
+                    ctx.bot.tree.clear_commands(guild=ctx.guild)
+                    await ctx.bot.tree.sync(guild=ctx.guild)
+                    synced = []
+                else:
+                    synced = await ctx.bot.tree.sync()
+
+                self.logger.info(
+                    f"Synced {len(synced)} commands {'globally' if spec is None else 'to the current guild.'}")
+                await ctx.send(
+                    f"Synced {len(synced)} commands {'globally' if spec is None else 'to the current guild.'}"
+                )
+                return
+
+            ret = 0
+            for guild in guilds:
+                try:
+                    await ctx.bot.tree.sync(guild=guild)
+                except discord.HTTPException:
+                    pass
+                else:
+                    ret += 1
+
+            self.logger.info(f"Synced the tree to {ret}/{len(guilds)}.")
+            await ctx.send(f"Synced the tree to {ret}/{len(guilds)}.")
 
     @staticmethod
     async def remove_role(guild, member, role_name):
