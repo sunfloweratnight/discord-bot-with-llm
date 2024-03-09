@@ -38,8 +38,8 @@ async def setup():
     intents.members = True
 
     bot = commands.Bot(command_prefix='$', intents=intents)
-    await bot.add_cog(Gemini(bot, gemini_api_key, logger))
     await bot.add_cog(RoleOperation(bot, logger))
+    await bot.add_cog(Gemini(bot, gemini_api_key, logger))
     await bot.start(discord_api_key)
 
 keep_alive()

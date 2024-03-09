@@ -1,5 +1,6 @@
 import asyncio
 
+import discord
 import google.generativeai as genai
 from discord.ext import commands
 
@@ -59,23 +60,34 @@ class Gemini(commands.Cog):
                 if attempt == max_attempts:
                     return f"An error occurred after {max_attempts} attempts: {str(e)}"
 
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message):
+        if len(message.mentions) != 0 and self.bot.user in message.mentions and message.author != self.bot.user:
+            parts = message.content.split(' ', 1)
+            arguments = ' '.join(parts)
+            async with message.channel.typing():
+                await self.process_message(arguments, message, message.author.display_name)
+
     @commands.command()
     @commands.has_any_role("Parent", "Toddler")
     async def gem(self, ctx, *args):
         arguments = sanitize_args(args)
         async with ctx.typing():
-            if arguments == '':
-                await ctx.reply('どしたん？話きこか？')
-                return
+            await self.process_message(arguments, ctx, ctx.author.display_name)
 
-            if arguments == 'reset':
-                self.logger.info(f"{ctx.author.display_name} is resetting the chat")
-                self.chat.history.clear()
-                self.chat.history = self.initial_prompt
-                await ctx.reply('チャットの履歴をリセットしたお')
-                return
+    async def process_message(self, arguments, reply_func, author_name):
+        if arguments == '':
+            await reply_func.reply('どしたん？話きこか？')
+            return
 
-            self.logger.info(f"{ctx.author.display_name} is sending message: {arguments}")
-            response = await self.send_chat_message(f"{ctx.author.display_name}: {arguments}")
-            self.logger.info(f"Gemini response: {response}")
-            await ctx.reply(response.text if hasattr(response, 'text') else response)
+        if arguments == 'reset':
+            self.logger.info(f"{author_name} is resetting the chat")
+            self.chat.history.clear()
+            self.chat.history = self.initial_prompt
+            await reply_func.reply('チャットの履歴をリセットしたお')
+            return
+
+        self.logger.info(f"{author_name} is sending message: {arguments}")
+        response = await self.send_chat_message(f"{author_name}: {arguments}")
+        self.logger.info(f"Gemini response: {response}")
+        await reply_func.reply(response.text if hasattr(response, 'text') else response)

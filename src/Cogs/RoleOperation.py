@@ -20,13 +20,12 @@ class RoleOperation(commands.Cog):
     @commands.Cog.listener()
     async def on_ready(self):
         self.logger.info(f"Connecting to the channel")
-        # await self.bot.tree.sync(guild=discord.Object(id=1030501230797131887))
         self.guild = self.bot.get_guild(self.guild_id)
+        await self.bot.tree.sync(guild=discord.Object(id=self.guild_id))
         self.logger.info(f'Connected to {self.guild.name}')
-        # await self.bot.tree.sync()
 
         async for member in self.guild.fetch_members(limit=None):
-            if not member.bot and [role for role in member.roles if role.name != 'Admin']:
+            if not member.bot and [role for role in member.roles if role.name != 'Parent']:
                 self.members.append(member)
 
         for channel in self.guild.text_channels:
