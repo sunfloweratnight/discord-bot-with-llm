@@ -69,6 +69,7 @@ class RoleOperation(commands.Cog):
 
     @app_commands.command(name="shutdown", description="Shutting down the bot.")
     @app_commands.guilds(1030501230797131887)
+    @app_commands.default_permissions(administrator=True)
     async def shutdown(self, interaction: discord.Interaction):
         self.logger.info(f"Shutting down the bot")
         await self.log_channel.send(f"Shutting down the bot")
