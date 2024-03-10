@@ -13,7 +13,7 @@ class DiscordBot(commands.Bot):
         self.gemini_api_key = gemini_api_key
         self.discord_api_key = discord_api_key
 
-        command_prefix = '$'
+        command_prefix = '!'
         intents = discord.Intents.default()
         intents.message_content = True
         intents.members = True
