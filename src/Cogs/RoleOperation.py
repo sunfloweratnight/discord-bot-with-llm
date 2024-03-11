@@ -1,20 +1,24 @@
 import re
+from typing import Literal, Optional
 
 import discord
-from discord import app_commands
+from discord import app_commands, RawReactionActionEvent, Message
+from discord.abc import Messageable
 from discord.ext import commands
-from typing import Literal, Optional
 
 
 class RoleOperation(commands.Cog):
     def __init__(self, bot, logger):
-        self.log_channel = None
+
         self.members = []
         self.public_channels = []
         self.private_channels = []
         self.bot = bot
         self.logger = logger
-        self.log_channel = 1148894899358404618
+        self.log_channel_id = 1148894899358404618 #TODO: to be env
+        self.log_channel = None
+        self.gakubuchi_channel_id = 1173806749757743134 #TODO: to be env
+        self.gakubuchi_channel = None
         self.guild_id = 1030501230797131887
         self.guild = None
         self.history = []
@@ -40,7 +44,8 @@ class RoleOperation(commands.Cog):
             #     self.logger.info(f'getting {message}')
             #     self.history.append(message)
 
-        self.log_channel = self.guild.get_channel(self.log_channel)
+        self.log_channel: Messageable = self.guild.get_channel(self.log_channel_id)
+        self.gakubuchi_channel: Messageable = self.guild.get_channel(self.gakubuchi_channel_id)
 
     @commands.Cog.listener()
     async def on_member_join(self, member):
@@ -67,8 +72,27 @@ class RoleOperation(commands.Cog):
             await self.log_channel.send(
                 f'{author.mention} said their first word! They are Toddler now! {message.jump_url}')
 
+    @commands.Cog.listener()
+    @commands.has_any_role("Parent", "Toddler")
+    async def on_raw_reaction_add(self, payload: RawReactionActionEvent):
+        if str(payload.emoji.name) != '🖼️':
+            return
+
+        channel_reacted = self.guild.get_channel(payload.channel_id)
+        msg_reacted: Message = await channel_reacted.fetch_message(payload.message_id)
+
+        embed: discord.Embed = discord.Embed(
+            title=f"#{channel_reacted.name}",
+            url=msg_reacted.jump_url,
+            description=f"**{msg_reacted.content}**",
+            color=0x00ff00,
+        )
+        embed.set_author(name=msg_reacted.author.display_name, icon_url=msg_reacted.author.avatar.url)
+        embed.set_footer(text=f"Collected by {payload.member.display_name}")
+        await self.gakubuchi_channel.send(f"{msg_reacted.author.mention}", embed=embed)
+
     @app_commands.command(name="shutdown", description="Shutting down the bot.")
-    @app_commands.guilds(1030501230797131887)
+    @app_commands.guilds(1030501230797131887) #TODO: ハードコードなんとかしたい
     @app_commands.default_permissions(administrator=True)
     async def shutdown(self, interaction: discord.Interaction):
         self.logger.info(f"Shutting down the bot")
