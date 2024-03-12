@@ -81,7 +81,8 @@ class RoleOperation(commands.Cog):
         channel_reacted = self.guild.get_channel(payload.channel_id)
         msg_reacted: Message = await channel_reacted.fetch_message(payload.message_id)
 
-        if len(msg_reacted.reactions) != 0 and any(reaction.emoji == '🖼️' for reaction in msg_reacted.reactions):
+        reaction = [reaction for reaction in msg_reacted.reactions if str(reaction.emoji) == '🖼️'][0]
+        if reaction.count >= 1:
             return
 
         embed: discord.Embed = discord.Embed(
