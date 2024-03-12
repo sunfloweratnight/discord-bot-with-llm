@@ -78,6 +78,6 @@ class Gemini(commands.Cog):
             return
 
         self.logger.info(f"{author_name} is sending message: {arguments}")
-        response = await self.send_chat_message(f"{author_name}: {arguments}")
+        response = self.send_chat_message(f"{author_name}: {arguments}")
         self.logger.info(f"Gemini response: {response}")
         await reply_func.reply(response.text if hasattr(response, 'text') else response)
