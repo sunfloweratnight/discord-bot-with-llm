@@ -82,7 +82,7 @@ class RoleOperation(commands.Cog):
         msg_reacted: Message = await channel_reacted.fetch_message(payload.message_id)
 
         reaction = [reaction for reaction in msg_reacted.reactions if str(reaction.emoji) == '🖼️'][0]
-        if reaction.count >= 1:
+        if reaction.count > 1:
             return
 
         embed: discord.Embed = discord.Embed(
