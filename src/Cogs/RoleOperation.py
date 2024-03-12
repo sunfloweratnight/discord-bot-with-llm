@@ -85,10 +85,11 @@ class RoleOperation(commands.Cog):
         if reaction.count > 1:
             return
 
+        desc = msg_reacted.content if f"**{msg_reacted.content}**" else ""
         embed: discord.Embed = discord.Embed(
             title=f"#{channel_reacted.name}",
             url=msg_reacted.jump_url,
-            description=f"**{msg_reacted.content}**",
+            description=desc,
             color=0x00ff00,
         )
         embed.set_author(name=msg_reacted.author.display_name, icon_url=msg_reacted.author.avatar.url)
