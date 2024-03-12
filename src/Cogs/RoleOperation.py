@@ -15,9 +15,9 @@ class RoleOperation(commands.Cog):
         self.private_channels = []
         self.bot = bot
         self.logger = logger
-        self.log_channel_id = 1148894899358404618 #TODO: to be env
+        self.log_channel_id = 1148894899358404618  # TODO: to be env
         self.log_channel = None
-        self.gakubuchi_channel_id = 1173806749757743134 #TODO: to be env
+        self.gakubuchi_channel_id = 1173806749757743134  # TODO: to be env
         self.gakubuchi_channel = None
         self.guild_id = 1030501230797131887
         self.guild = None
@@ -81,6 +81,9 @@ class RoleOperation(commands.Cog):
         channel_reacted = self.guild.get_channel(payload.channel_id)
         msg_reacted: Message = await channel_reacted.fetch_message(payload.message_id)
 
+        if len(msg_reacted.reactions) != 0 and '🖼️' in msg_reacted.reactions:
+            return
+
         embed: discord.Embed = discord.Embed(
             title=f"#{channel_reacted.name}",
             url=msg_reacted.jump_url,
@@ -92,7 +95,7 @@ class RoleOperation(commands.Cog):
         await self.gakubuchi_channel.send(f"{msg_reacted.author.mention}", embed=embed)
 
     @app_commands.command(name="shutdown", description="Shutting down the bot.")
-    @app_commands.guilds(1030501230797131887) #TODO: ハードコードなんとかしたい
+    @app_commands.guilds(1030501230797131887)  # TODO: ハードコードなんとかしたい
     @app_commands.default_permissions(administrator=True)
     async def shutdown(self, interaction: discord.Interaction):
         self.logger.info(f"Shutting down the bot")
