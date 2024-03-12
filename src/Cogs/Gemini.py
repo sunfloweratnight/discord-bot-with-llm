@@ -40,23 +40,15 @@ class Gemini(commands.Cog):
 
     async def send_chat_message(self, msg):
         max_attempts = 3
-        delay = 5
         for attempt in range(1, max_attempts + 1):
             try:
-                return await self.chat.send_message(msg)
-            except (asyncio.TimeoutError, Exception) as e:
-                if not self.retry_send_message(e, attempt, max_attempts, delay, msg):
+                return self.chat.send_message(msg)
+            except asyncio.TimeoutError:
+                if attempt == max_attempts:
+                    return f"Timeout error: The request took too long to complete after {max_attempts} attempts."
+            except Exception as e:
+                if attempt == max_attempts:
                     return f"An error occurred after {max_attempts} attempts: {str(e)}"
-
-    def retry_send_message(self, exception, attempt, max_attempts, delay, msg):
-        if attempt < max_attempts:
-            asyncio.sleep(delay)
-            return True
-        else:
-            self.logger.error(
-                f"{'Timeout error: The request took too long to complete' if isinstance(exception, asyncio.TimeoutError) else 'An error occurred'} after {max_attempts} attempts."
-            )
-            return False
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
