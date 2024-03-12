@@ -38,17 +38,17 @@ class Gemini(commands.Cog):
         model = genai.GenerativeModel(safety_settings=self.SAFETY_SETTINGS)
         self.chat = model.start_chat(history=self.INITIAL_PROMPT)
 
-    async def send_chat_message(self, msg):
-        max_attempts = 3
-        for attempt in range(1, max_attempts + 1):
-            try:
-                return self.chat.send_message(msg)
-            except asyncio.TimeoutError:
-                if attempt == max_attempts:
-                    return f"Timeout error: The request took too long to complete after {max_attempts} attempts."
-            except Exception as e:
-                if attempt == max_attempts:
-                    return f"An error occurred after {max_attempts} attempts: {str(e)}"
+    # async def send_chat_message(self, msg):
+    #     max_attempts = 3
+    #     for attempt in range(1, max_attempts + 1):
+    #         try:
+    #             return await self.chat.send_message(msg)
+    #         except asyncio.TimeoutError:
+    #             if attempt == max_attempts:
+    #                 return f"Timeout error: The request took too long to complete after {max_attempts} attempts."
+    #         except Exception as e:
+    #             if attempt == max_attempts:
+    #                 return f"An error occurred after {max_attempts} attempts: {str(e)}"
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -78,6 +78,6 @@ class Gemini(commands.Cog):
             return
 
         self.logger.info(f"{author_name} is sending message: {arguments}")
-        response = self.send_chat_message(f"{author_name}: {arguments}")
+        response = await self.chat.send_message(f"{author_name}: {arguments}")
         self.logger.info(f"Gemini response: {response}")
         await reply_func.reply(response.text if hasattr(response, 'text') else response)
