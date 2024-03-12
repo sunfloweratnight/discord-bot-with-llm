@@ -93,6 +93,8 @@ class RoleOperation(commands.Cog):
         )
         embed.set_author(name=msg_reacted.author.display_name, icon_url=msg_reacted.author.avatar.url)
         embed.set_footer(text=f"Collected by {payload.member.display_name}")
+        if msg_reacted.attachments:
+            embed.set_image(url=msg_reacted.attachments[0].url)
         await self.gakubuchi_channel.send(f"{msg_reacted.author.mention}", embed=embed)
 
     @app_commands.command(name="shutdown", description="Shutting down the bot.")

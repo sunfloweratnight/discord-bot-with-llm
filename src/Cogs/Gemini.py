@@ -8,30 +8,15 @@ from src.Cogs.Utils import sanitize_args
 
 
 class Gemini(commands.Cog):
-    def __init__(self, bot, api_key, logger):
-        self.bot = bot
-        self.logger = logger
+    SAFETY_SETTINGS = [
+        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+    ]
 
-        safety_settings = [
-            {
-                "category": "HARM_CATEGORY_HARASSMENT",
-                "threshold": "BLOCK_NONE"
-            },
-            {
-                "category": "HARM_CATEGORY_HATE_SPEECH",
-                "threshold": "BLOCK_NONE"
-            },
-            {
-                "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                "threshold": "BLOCK_NONE"
-            },
-            {
-                "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
-                "threshold": "BLOCK_NONE"
-            },
-        ]
-
-        self.initial_prompt = [{
+    INITIAL_PROMPT = [
+        {
             "role": "user",
             "parts": [
                 "As a chatbot operating within Discord, your responsibility is to receive and keep track of messages "
@@ -39,26 +24,44 @@ class Gemini(commands.Cog):
                 "that a user named John is reaching out. Now, let's begin. Chi-chan: 'Hi, who am I?'"
             ]
         },
-            {
-                "role": "model",
-                "parts": ["Hi you are Chi-chan, nice to meet you too. What can I do for you today?"]
-            }, ]
+        {
+            "role": "model",
+            "parts": ["Hi you are Chi-chan, nice to meet you too. What can I do for you today?"]
+        },
+    ]
+
+    def __init__(self, bot, api_key, logger):
+        self.bot = bot
+        self.logger = logger
 
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel(safety_settings=safety_settings)
-        self.chat = model.start_chat(history=self.initial_prompt)
+        model = genai.GenerativeModel(safety_settings=self.SAFETY_SETTINGS)
+        self.chat = model.start_chat(history=self.INITIAL_PROMPT)
 
     async def send_chat_message(self, msg):
         max_attempts = 3
+        delay = 5
         for attempt in range(1, max_attempts + 1):
             try:
-                return self.chat.send_message(msg)
-            except asyncio.TimeoutError:
-                if attempt == max_attempts:
-                    return f"Timeout error: The request took too long to complete after {max_attempts} attempts."
-            except Exception as e:
-                if attempt == max_attempts:
+                return await self.chat.send_message(msg)
+            except (asyncio.TimeoutError, Exception) as e:
+                if not self.retry_send_message(e, attempt, max_attempts, delay, msg):
                     return f"An error occurred after {max_attempts} attempts: {str(e)}"
+
+    def retry_send_message(self, exception, attempt, max_attempts, delay, msg):
+        if attempt < max_attempts:
+            asyncio.sleep(delay)
+            return True
+        else:
+            self.logger.error(
+                f"{'Timeout error: The request took too long to complete' if isinstance(exception, asyncio.TimeoutError) else 'An error occurred'} after {max_attempts} attempts."
+            )
+            if attempt == max_attempts:
+                self.logger.info("Removing the first half of the chat history")
+                half_length = len(self.chat.history) // 2
+                self.chat.history = self.chat.history[half_length:]
+                asyncio.create_task(self.send_chat_message(msg))
+            return False
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -83,7 +86,7 @@ class Gemini(commands.Cog):
         if arguments == 'reset':
             self.logger.info(f"{author_name} is resetting the chat")
             self.chat.history.clear()
-            self.chat.history = self.initial_prompt
+            self.chat.history = self.INITIAL_PROMPT
             await reply_func.reply('チャットの履歴をリセットしたお')
             return
 
