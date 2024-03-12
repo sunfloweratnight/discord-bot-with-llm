@@ -56,11 +56,6 @@ class Gemini(commands.Cog):
             self.logger.error(
                 f"{'Timeout error: The request took too long to complete' if isinstance(exception, asyncio.TimeoutError) else 'An error occurred'} after {max_attempts} attempts."
             )
-            if attempt == max_attempts:
-                self.logger.info("Removing the first half of the chat history")
-                half_length = len(self.chat.history) // 2
-                self.chat.history = self.chat.history[half_length:]
-                asyncio.create_task(self.send_chat_message(msg))
             return False
 
     @commands.Cog.listener()

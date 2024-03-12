@@ -65,6 +65,7 @@ class RoleOperation(commands.Cog):
         is_in_public_channels = message.channel.id in public_channels_ids
         is_author_infant = "Infant" in member_roles
 
+        # TODO: use embed
         if not is_message_empty and not is_author_bot and is_in_public_channels and is_author_infant:
             self.logger.info(f'{author.display_name} said {message.content}')
             await self.assign_role(message.guild, author, 'Toddler')
