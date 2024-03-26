@@ -52,7 +52,10 @@ class Gemini(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        if len(message.mentions) != 0 and self.bot.user in message.mentions and message.author != self.bot.user:
+        if len(message.mentions) != 0 \
+                and self.bot.user in message.mentions \
+                and message.author != self.bot.user\
+                and message.channel.id != 1173806749757743134:
             parts = message.content.split(' ', 1)
             arguments = ' '.join(parts)
             async with message.channel.typing():
