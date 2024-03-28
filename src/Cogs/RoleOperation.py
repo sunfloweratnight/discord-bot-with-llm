@@ -27,8 +27,8 @@ class RoleOperation(commands.Cog):
         self.guild = None
         self.history = []
         self.emoji_channel_map = {
-            '🖼️': 'gakubuchi_channel',
-            'minna_bunko': 'minna_bunko_channel'
+            '🖼️': self.gakubuchi_channel_id,
+            'minna_bunko': self.minna_bunko_channel_id
         }
 
     @commands.Cog.listener()
@@ -115,8 +115,7 @@ class RoleOperation(commands.Cog):
         embed.set_footer(text=f"Collected by {payload.member.display_name}")
         if msg_reacted.attachments:
             embed.set_image(url=msg_reacted.attachments[0].url)
-        channel_name = self.emoji_channel_map[emoji_name]
-        channel_destination = getattr(self, channel_name)
+        channel_destination = self.guild.get_channel(self.emoji_channel_map[emoji_name])
         await channel_destination.send(f"{msg_reacted.author.mention}", embed=embed)
 
     @app_commands.command(name="shutdown", description="Shutting down the bot.")
