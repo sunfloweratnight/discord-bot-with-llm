@@ -14,6 +14,11 @@ class Settings(BaseSettings):
     POSTGRES_EXTERNAL_URL: str
     IS_PROD: bool
 
+    LOG_CHANNEL_ID: int
+    GAKUBUCHI_CHANNEL_ID: int
+    MINNA_BUNKO_CHANNEL_ID: int
+    GUILD_ID: int
+
     class Config:
         env_file = ".env"
 

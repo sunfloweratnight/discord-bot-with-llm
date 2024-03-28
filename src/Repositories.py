@@ -1,6 +1,7 @@
 import uuid
-from typing import TypeVar, Generic
+from typing import TypeVar, Generic, Any, Sequence
 
+from sqlalchemy import select, Row, RowMapping
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.Entities import BaseEntity
@@ -8,7 +9,7 @@ from src.Entities import BaseEntity
 Model = TypeVar('Model', bound=BaseEntity)
 
 
-class MessageRepository(Generic[Model]):
+class DatabaseRepository(Generic[Model]):
     def __init__(self, model: type[Model], session: AsyncSession) -> None:
         self.model = model
         self.session = session
@@ -22,3 +23,7 @@ class MessageRepository(Generic[Model]):
 
     async def get(self, pk: uuid.UUID) -> Model | None:
         return await self.session.get(self.model, pk)
+
+    async def get_all(self) -> Sequence[Row[Model] | RowMapping | Model]:
+        result = await self.session.execute(select(self.model))
+        return result.scalars().all()

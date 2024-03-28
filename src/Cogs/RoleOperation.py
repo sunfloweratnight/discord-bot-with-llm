@@ -6,6 +6,8 @@ from discord import app_commands, RawReactionActionEvent, Message
 from discord.abc import Messageable
 from discord.ext import commands
 
+from Config import settings
+
 
 class RoleOperation(commands.Cog):
     def __init__(self, bot, logger):
@@ -15,13 +17,19 @@ class RoleOperation(commands.Cog):
         self.private_channels = []
         self.bot = bot
         self.logger = logger
-        self.log_channel_id = 1148894899358404618  # TODO: to be env
+        self.log_channel_id = settings.LOG_CHANNEL_ID
+        self.gakubuchi_channel_id = settings.GAKUBUCHI_CHANNEL_ID
+        self.minna_bunko_channel_id = settings.MINNA_BUNKO_CHANNEL_ID
         self.log_channel = None
-        self.gakubuchi_channel_id = 1173806749757743134  # TODO: to be env
         self.gakubuchi_channel = None
-        self.guild_id = 1030501230797131887
+        self.minna_bunko_channel = None
+        self.guild_id = settings.GUILD_ID
         self.guild = None
         self.history = []
+        self.emoji_channel_map = {
+            '🖼️': 'gakubuchi_channel',
+            'minna_bunko': 'minna_bunko_channel'
+        }
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -46,6 +54,7 @@ class RoleOperation(commands.Cog):
 
         self.log_channel: Messageable = self.guild.get_channel(self.log_channel_id)
         self.gakubuchi_channel: Messageable = self.guild.get_channel(self.gakubuchi_channel_id)
+        self.minna_bunko_channel: Messageable = self.guild.get_channel(self.minna_bunko_channel_id)
 
     @commands.Cog.listener()
     async def on_member_join(self, member):
@@ -76,14 +85,23 @@ class RoleOperation(commands.Cog):
     @commands.Cog.listener()
     @commands.has_any_role("Parent", "Toddler")
     async def on_raw_reaction_add(self, payload: RawReactionActionEvent):
-        if str(payload.emoji.name) != '🖼️':
+        emoji_name = str(payload.emoji.name)
+        if emoji_name not in self.emoji_channel_map:
             return
 
         channel_reacted = self.guild.get_channel(payload.channel_id)
         msg_reacted: Message = await channel_reacted.fetch_message(payload.message_id)
 
-        reaction = [reaction for reaction in msg_reacted.reactions if str(reaction.emoji) == '🖼️'][0]
-        if reaction.count > 1:
+        reaction_count = 0
+        for reaction in msg_reacted.reactions:
+            # check if the emoji is string or emoji object
+            if isinstance(reaction.emoji, str):
+                if reaction.emoji == emoji_name:
+                    reaction_count = reaction.count
+            else:
+                if reaction.emoji.name == emoji_name:
+                    reaction_count = reaction.count
+        if reaction_count > 1:
             return
 
         desc = msg_reacted.content if f"**{msg_reacted.content}**" else ""
@@ -97,10 +115,12 @@ class RoleOperation(commands.Cog):
         embed.set_footer(text=f"Collected by {payload.member.display_name}")
         if msg_reacted.attachments:
             embed.set_image(url=msg_reacted.attachments[0].url)
-        await self.gakubuchi_channel.send(f"{msg_reacted.author.mention}", embed=embed)
+        channel_name = self.emoji_channel_map[emoji_name]
+        channel_destination = getattr(self, channel_name)
+        await channel_destination.send(f"{msg_reacted.author.mention}", embed=embed)
 
     @app_commands.command(name="shutdown", description="Shutting down the bot.")
-    @app_commands.guilds(1030501230797131887)  # TODO: ハードコードなんとかしたい
+    @app_commands.guilds(settings.GUILD_ID)
     @app_commands.default_permissions(administrator=True)
     async def shutdown(self, interaction: discord.Interaction):
         self.logger.info(f"Shutting down the bot")
