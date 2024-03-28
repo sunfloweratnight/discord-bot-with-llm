@@ -1,4 +1,11 @@
-discord.py==2.3.2
+discord.py~=2.3.2
 google-generativeai==0.4.0
 python-dotenv==1.0.0
 flask~=3.0.2
+pydantic~=2.6.3
+pydantic-settings==2.2.1
+SQLAlchemy~=2.0.28
+pgvector~=0.2.5
+asyncpg==0.29.0
+fastapi~=0.110.0
+typing_extensions==4.10.0

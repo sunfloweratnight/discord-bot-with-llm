@@ -1,10 +1,13 @@
-import asyncio
+from datetime import timezone
 
 import discord
 import google.generativeai as genai
 from discord.ext import commands
 
+from src import Entities, Session
 from src.Cogs.Utils import sanitize_args
+from src.Models import MessagePayload
+from src.Repositories import DatabaseRepository
 
 
 class Gemini(commands.Cog):
@@ -52,7 +55,10 @@ class Gemini(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        if len(message.mentions) != 0 and self.bot.user in message.mentions and message.author != self.bot.user:
+        if len(message.mentions) != 0 \
+                and self.bot.user in message.mentions \
+                and message.author != self.bot.user \
+                and message.channel.id != 1173806749757743134:
             parts = message.content.split(' ', 1)
             arguments = ' '.join(parts)
             async with message.channel.typing():
@@ -64,6 +70,32 @@ class Gemini(commands.Cog):
         arguments = sanitize_args(args)
         async with ctx.typing():
             await self.process_message(arguments, ctx, ctx.author.display_name)
+
+    @commands.command()
+    @commands.has_any_role("Parent", "Toddler")
+    async def save_message(self, ctx, *args):
+        async with ctx.typing():
+            message: MessagePayload = MessagePayload(
+                member_id=ctx.author.id,
+                channel_id=ctx.channel.id,
+                msg_id=ctx.message.id,
+                created_at=ctx.message.created_at.astimezone(timezone.utc).replace(tzinfo=None)
+            )
+        async for session in Session.get_db_session():
+            self.logger.info(f"Saving message: {message.dict()}")
+            repo = DatabaseRepository(Entities.Message, session)
+            await repo.create(message.dict())
+            self.logger.info(f"Message saved: {message.dict()}")
+
+    @commands.command()
+    @commands.has_any_role("Parent", "Toddler")
+    async def get_messages(self, ctx, *args):
+        async with ctx.typing():
+            async for session in Session.get_db_session():
+                self.logger.info(f"Getting all messages")
+                repo = DatabaseRepository(Entities.Message, session)
+                messages = await repo.get_all()
+                await ctx.send(f"Messages: {messages[0].msg_id}")
 
     async def process_message(self, arguments, reply_func, author_name):
         if arguments == '':

@@ -1,17 +1,16 @@
-import logging
-import logging.handlers
-
 import discord
 from discord.ext import commands
 
+from Config import settings
 from src.Cogs.Gemini import Gemini
 from src.Cogs.RoleOperation import RoleOperation
+from src.Logger import Logger
 
 
 class DiscordBot(commands.Bot):
-    def __init__(self, discord_api_key, gemini_api_key) -> None:
-        self.gemini_api_key = gemini_api_key
-        self.discord_api_key = discord_api_key
+    def __init__(self) -> None:
+        self.gemini_api_key = settings.GEMINI_API_KEY
+        self.discord_api_key = settings.DISCORD_API_KEY
 
         command_prefix = '!'
         intents = discord.Intents.default()
@@ -20,15 +19,8 @@ class DiscordBot(commands.Bot):
 
         super().__init__(command_prefix, intents=intents)
 
-        self.logger = logging.getLogger('discord')
-        self.logger.setLevel(logging.INFO)
-
-        dt_fmt = '%Y-%m-%d %H:%M:%S'
-        formatter = logging.Formatter('[{asctime}] [{levelname:<8}] {name}: {message}', dt_fmt, style='{')
-
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(formatter)
-        self.logger.addHandler(console_handler)
+        logger_factory = Logger('discord')
+        self.logger = logger_factory.get_logger()
 
     async def setup_hook(self):
         self.logger.info('Setting up the cogs')
