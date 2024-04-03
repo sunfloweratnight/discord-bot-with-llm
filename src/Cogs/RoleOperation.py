@@ -58,6 +58,7 @@ class RoleOperation(commands.Cog):
         self.log_channel: Messageable = self.guild.get_channel(self.log_channel_id)
         self.gakubuchi_channel: Messageable = self.guild.get_channel(self.gakubuchi_channel_id)
         self.minna_bunko_channel: Messageable = self.guild.get_channel(self.minna_bunko_channel_id)
+        self.freememo_channel: Messageable = self.guild.get_channel(self.freememo_channel_id)
 
     @commands.Cog.listener()
     async def on_member_join(self, member):
@@ -92,6 +93,7 @@ class RoleOperation(commands.Cog):
         if emoji_name not in self.emoji_channel_map:
             return
 
+        self.logger.info(f"Emoji {emoji_name} is reacted")
         channel_reacted = self.guild.get_channel(payload.channel_id)
         msg_reacted: Message = await channel_reacted.fetch_message(payload.message_id)
 
