@@ -119,6 +119,7 @@ class RoleOperation(commands.Cog):
         if msg_reacted.attachments:
             embed.set_image(url=msg_reacted.attachments[0].url)
         channel_destination = self.guild.get_channel(self.emoji_channel_map[emoji_name])
+        self.logger.info(f"Sending the message to {channel_destination.name}")
         await channel_destination.send(f"{msg_reacted.author.mention}", embed=embed)
 
     @app_commands.command(name="shutdown", description="Shutting down the bot.")
