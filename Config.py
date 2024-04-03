@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     LOG_CHANNEL_ID: int
     GAKUBUCHI_CHANNEL_ID: int
     MINNA_BUNKO_CHANNEL_ID: int
+    FREEMEMO_CHANNEL_ID: int
     GUILD_ID: int
 
     class Config:
