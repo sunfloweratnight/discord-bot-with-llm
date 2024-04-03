@@ -20,15 +20,18 @@ class RoleOperation(commands.Cog):
         self.log_channel_id = settings.LOG_CHANNEL_ID
         self.gakubuchi_channel_id = settings.GAKUBUCHI_CHANNEL_ID
         self.minna_bunko_channel_id = settings.MINNA_BUNKO_CHANNEL_ID
+        self.freememo_channel_id = settings.FREEMEMO_CHANNEL_ID
         self.log_channel = None
         self.gakubuchi_channel = None
         self.minna_bunko_channel = None
+        self.freememo_channel = None
         self.guild_id = settings.GUILD_ID
         self.guild = None
         self.history = []
         self.emoji_channel_map = {
             '🖼️': self.gakubuchi_channel_id,
-            'minna_bunko': self.minna_bunko_channel_id
+            'minna_bunko': self.minna_bunko_channel_id,
+            '📝': self.minna_bunko_channel_id
         }
 
     @commands.Cog.listener()
