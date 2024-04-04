@@ -7,6 +7,8 @@ from discord.abc import Messageable
 from discord.ext import commands
 
 from Config import settings
+from src import Entities, Session
+from src.Repositories import DatabaseRepository
 
 
 class RoleOperation(commands.Cog):
@@ -31,7 +33,7 @@ class RoleOperation(commands.Cog):
         self.emoji_channel_map = {
             '🖼️': self.gakubuchi_channel_id,
             'minna_bunko': self.minna_bunko_channel_id,
-            '📝': self.minna_bunko_channel_id
+            '📝': self.freememo_channel_id
         }
 
     @commands.Cog.listener()
@@ -51,14 +53,36 @@ class RoleOperation(commands.Cog):
             else:
                 self.private_channels.append(channel)
 
-            # async for message in channel.history(limit=None):
-            #     self.logger.info(f'getting {message}')
-            #     self.history.append(message)
+            # async for message in channel.history(limit=10):
+            #     disc_msg: discord.Message = message
+            #     msg: MessagePayload = MessagePayload(
+            #         member_id=disc_msg.author.id,
+            #         channel_id=disc_msg.channel.id,
+            #         msg_id=disc_msg.id,
+            #         created_at=disc_msg.created_at.astimezone(timezone.utc).replace(tzinfo=None)
+            #     )
+            #     async for session in Session.get_db_session():
+            #         self.logger.info(f"Saving message: {msg.dict()}")
+            #         repo = DatabaseRepository(Entities.Message, session)
+            #         await repo.create(msg.dict())
+            #         self.logger.info(f"Message saved: {msg.dict()}")
 
         self.log_channel: Messageable = self.guild.get_channel(self.log_channel_id)
         self.gakubuchi_channel: Messageable = self.guild.get_channel(self.gakubuchi_channel_id)
         self.minna_bunko_channel: Messageable = self.guild.get_channel(self.minna_bunko_channel_id)
         self.freememo_channel: Messageable = self.guild.get_channel(self.freememo_channel_id)
+
+    @app_commands.command(name="getallmessages", description="Getting all messages")
+    @app_commands.guilds(settings.GUILD_ID)
+    @app_commands.default_permissions(administrator=True)
+    async def get_messages(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        async for session in Session.get_db_session():
+            self.logger.info(f"Getting all messages")
+            repo = DatabaseRepository(Entities.Message, session)
+            messages = await repo.get_all()
+            disc_msg = await self.guild.get_channel(messages[0].channel_id).fetch_message(messages[0].msg_id)
+            await interaction.followup.send(f"Messages: {disc_msg.content}")
 
     @commands.Cog.listener()
     async def on_member_join(self, member):
