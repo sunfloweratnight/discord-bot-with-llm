@@ -11,7 +11,7 @@ async def setup():
 
 
 async def main():
-    await migrate_tables()
+    # await migrate_tables()
     await setup()
 
 keep_alive()
