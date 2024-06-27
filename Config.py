@@ -2,9 +2,9 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    # DISCORD_API_KEY: str
-    # OPENAI_API_KEY: str
-    # GEMINI_API_KEY: str
+    DISCORD_API_KEY: str
+    OPENAI_API_KEY: str
+    GEMINI_API_KEY: str
     # COHERE_API_KEY: str
     # POSTGRES_HOSTNAME: str
     # POSTGRES_PORT: str
