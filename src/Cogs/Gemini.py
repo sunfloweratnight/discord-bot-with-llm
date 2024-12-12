@@ -38,7 +38,18 @@ class Gemini(commands.Cog):
         self.logger = logger
 
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel(safety_settings=self.SAFETY_SETTINGS)
+        generation_config = {
+  "temperature": 1,
+  "top_p": 0.95,
+  "top_k": 40,
+  "max_output_tokens": 8192,
+  "response_mime_type": "text/plain",
+}
+
+model = genai.GenerativeModel(
+  model_name="gemini-2.0-flash-exp",
+  generation_config=generation_config,
+)
         self.chat = model.start_chat(history=self.INITIAL_PROMPT)
 
     # async def send_chat_message(self, msg):
