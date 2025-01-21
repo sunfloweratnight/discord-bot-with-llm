@@ -17,24 +17,12 @@ class Gemini(commands.Cog):
         {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
     ]
 
-    INITIAL_PROMPT = [
-        {
-            "role": "user",
-            "parts": [
-                "As a chatbot operating within Discord, your responsibility is to receive and keep track of messages "
-                "from various users. For instance, a user's message may appear as 'John: Hello, there!' indicating "
-                "that a user named John is reaching out. Now, let's begin. Chi-chan: 'Hi, who am I?'"
-            ]
-        },
-        {
-            "role": "model",
-            "parts": ["Hi you are Chi-chan, nice to meet you too. What can I do for you today?"]
-        },
-    ]
-
-    def __init__(self, bot, api_key, logger):
+    def __init__(self, bot, api_key, logger, initial_prompt):
         self.bot = bot
         self.logger = logger
+        self.initial_prompt = [
+            {"role": "user", "parts": [self.initial_prompt]}
+        ]
 
         genai.configure(api_key=api_key)
         generation_config = {
@@ -49,7 +37,8 @@ class Gemini(commands.Cog):
             generation_config=generation_config,
             safety_settings=self.SAFETY_SETTINGS  # Added safety settings
         )
-        self.chat = self.model.start_chat(history=self.INITIAL_PROMPT)
+
+        self.chat = self.model.start_chat(history=self.initial_prompt)
 
     async def send_chat_message(self, msg):
         """Asynchronously send a message to the chat with retry logic"""
@@ -133,7 +122,7 @@ class Gemini(commands.Cog):
 
         if arguments.lower() == 'reset':
             self.logger.info(f"{author_name} is resetting the chat")
-            self.chat = self.model.start_chat(history=self.INITIAL_PROMPT)
+            self.chat = self.model.start_chat(history=self.initial_prompt)
             await reply_func.reply('チャットの履歴をリセットしたお')
             return
 

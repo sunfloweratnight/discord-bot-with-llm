@@ -11,6 +11,7 @@ class DiscordBot(commands.Bot):
     def __init__(self) -> None:
         self.gemini_api_key = settings.GEMINI_API_KEY
         self.discord_api_key = settings.DISCORD_API_KEY
+        self.initial_prompt = settings.INITIAL_PROMPT
 
         command_prefix = '!'
         intents = discord.Intents.default()
@@ -25,7 +26,7 @@ class DiscordBot(commands.Bot):
     async def setup_hook(self):
         self.logger.info('Setting up the cogs')
         await self.add_cog(RoleOperation(self, self.logger))
-        await self.add_cog(Gemini(self, self.gemini_api_key, self.logger))
+        await self.add_cog(Gemini(self, self.gemini_api_key, self.logger, self.initial_prompt))
         self.logger.info('Cogs are set up')
 
     async def get_started(self):
