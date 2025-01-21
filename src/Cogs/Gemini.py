@@ -21,7 +21,7 @@ class Gemini(commands.Cog):
         self.bot = bot
         self.logger = logger
         self.initial_prompt = [
-            {"role": "user", "parts": [self.initial_prompt]}
+            {"role": "user", "parts": [initial_prompt]}
         ]
 
         genai.configure(api_key=api_key)
