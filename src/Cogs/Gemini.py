@@ -245,6 +245,19 @@ class Gemini(commands.Cog):
                     return f"An error occurred after {max_attempts} attempts: {str(e)}"
                 await asyncio.sleep(1)
 
+    async def _generate_response(self, prompt: str) -> str:
+        """Generate a response using the chat model"""
+        try:
+            # Create a new chat for one-off responses
+            temp_chat = self.model.start_chat()
+            response = await asyncio.get_event_loop().run_in_executor(
+                None, temp_chat.send_message, prompt
+            )
+            return response.text if hasattr(response, 'text') else str(response)
+        except Exception as e:
+            self.logger.error(f"Error in _generate_response: {str(e)}")
+            return "申し訳ありません。応答の生成中にエラーが発生しました。"
+
     @commands.command()
     @commands.has_role("Parent")
     async def set_check_interval(self, ctx, hours: float):
