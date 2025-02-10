@@ -3,7 +3,10 @@ import discord
 import google.generativeai as genai
 from discord.ext import commands
 import asyncio
-import os
+from discord.ext import tasks
+import random
+import datetime
+from typing import List, Optional
 
 from src import Entities, Session
 from src.Cogs.Utils import sanitize_args
@@ -18,9 +21,6 @@ class Gemini(commands.Cog):
         {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
     ]
     MESSAGE_HISTORY_LIMIT = 50  # Default message history limit
-    DEFAULT_MODEL = "gemini-2.0-flash-exp"
-    AVAILABLE_MODELS = ["gemini-pro", "gemini-2.0-flash-exp"]
-    MAX_HISTORY_TOKENS = 30000  # Approximate token limit for history
 
     def __init__(self, bot, api_key, logger, initial_prompt):
         self.bot = bot
@@ -28,91 +28,100 @@ class Gemini(commands.Cog):
         self.initial_prompt = [
             {"role": "user", "parts": [initial_prompt]}
         ]
-        self.chat_history = []  # Store chat history
-        self.temperature = float(os.getenv('GEMINI_TEMPERATURE', '1.0'))
-        self.top_p = float(os.getenv('GEMINI_TOP_P', '0.95'))
-        self.top_k = int(os.getenv('GEMINI_TOP_K', '40'))
-        self.max_output_tokens = int(os.getenv('GEMINI_MAX_OUTPUT_TOKENS', '8192'))
-        self.model_name = os.getenv('GEMINI_MODEL', self.DEFAULT_MODEL)
 
         genai.configure(api_key=api_key)
-        self.generation_config = {
-            "temperature": self.temperature,
-            "top_p": self.top_p,
-            "top_k": self.top_k,
-            "max_output_tokens": self.max_output_tokens,
+        generation_config = {
+            "temperature": 1,
+            "top_p": 0.95,
+            "top_k": 40,
+            "max_output_tokens": 8192,
         }
         
-        self.model = self._create_model()
-        self.chat = self.model.start_chat(history=self.initial_prompt)
-
-    def _create_model(self):
-        """Create a new model instance with current configuration"""
-        return genai.GenerativeModel(
-            model_name=self.model_name,
-            generation_config=self.generation_config,
-            safety_settings=self.SAFETY_SETTINGS
+        self.model = genai.GenerativeModel(
+            model_name="gemini-2.0-flash-exp",  # Updated to use stable release model
+            generation_config=generation_config,
+            safety_settings=self.SAFETY_SETTINGS  # Added safety settings
         )
 
-    @commands.command()
-    @commands.has_role("Parent")
-    async def set_model(self, ctx, model_name: str):
-        """Set the Gemini model to use"""
-        if model_name not in self.AVAILABLE_MODELS:
-            available_models = ", ".join(self.AVAILABLE_MODELS)
-            await ctx.reply(f'利用可能なモデル: {available_models}')
-            return
-        self.model_name = model_name
-        self.model = self._create_model()
         self.chat = self.model.start_chat(history=self.initial_prompt)
-        await ctx.reply(f'モデルを {model_name} に変更しました。チャット履歴はリセットされました。')
+        self.last_check_channel = None
+        # 定期チェックを開始
+        self.periodic_infant_check.start()
 
-    @commands.command()
-    @commands.has_role("Parent")
-    async def set_temperature(self, ctx, temp: float):
-        """Set the temperature for text generation (0.0 to 1.0)"""
-        if temp < 0.0 or temp > 1.0:
-            await ctx.reply('temperatureは0.0から1.0の間で設定してください。')
-            return
-        self.temperature = temp
-        self.generation_config["temperature"] = temp
-        self.model = self._create_model()
-        await ctx.reply(f'temperatureを{temp}に設定しました。')
+    def cog_unload(self):
+        """Cogがアンロードされるときにタスクを停止"""
+        self.periodic_infant_check.cancel()
 
-    @commands.command()
-    @commands.has_any_role("Parent", "Toddler")
-    async def show_config(self, ctx):
-        """Show current model configuration"""
-        config = {
-            "モデル": self.model_name,
-            "Temperature": self.temperature,
-            "Top P": self.top_p,
-            "Top K": self.top_k,
-            "最大出力トークン": self.max_output_tokens,
-            "メッセージ履歴制限": self.MESSAGE_HISTORY_LIMIT
-        }
-        config_text = "\n".join([f"{k}: {v}" for k, v in config.items()])
-        await ctx.reply(f'現在の設定:\n```\n{config_text}\n```')
+    @tasks.loop(hours=3)  # 3時間ごとに実行
+    async def periodic_infant_check(self):
+        """定期的にInfantメンバーをチェックする"""
+        try:
+            # 日本時間で深夜0時から朝6時までは実行しない
+            jst_hour = (datetime.datetime.utcnow() + datetime.timedelta(hours=9)).hour
+            if 0 <= jst_hour < 6:
+                return
 
-    async def send_chat_message(self, msg):
-        """Asynchronously send a message to the chat with retry logic"""
-        max_attempts = 3
-        for attempt in range(1, max_attempts + 1):
-            try:
-                # Wrap the synchronous API call in an executor to make it async
-                response = await asyncio.get_event_loop().run_in_executor(
-                    None, self.chat.send_message, msg
-                )
-                return response
-            except asyncio.TimeoutError:
-                if attempt == max_attempts:
-                    return f"Timeout error: The request took too long to complete after {max_attempts} attempts."
-                await asyncio.sleep(1)  # Add delay between retries
-            except Exception as e:
-                if attempt == max_attempts:
-                    self.logger.error(f"Error in send_chat_message: {str(e)}")
-                    return f"An error occurred after {max_attempts} attempts: {str(e)}"
-                await asyncio.sleep(1)
+            guild = self.bot.get_guild(settings.GUILD_ID)
+            if not guild:
+                self.logger.error("Guild not found")
+                return
+
+            # チャンネルを取得（設定ファイルから適切なチャンネルIDを使用）
+            channel = guild.get_channel(settings.MINNA_BUNKO_CHANNEL_ID)  # または他の適切なチャンネルID
+            if not channel:
+                self.logger.error("Channel not found")
+                return
+
+            infant = await self._get_random_infant(guild)
+            if not infant:
+                self.logger.info("No Infant members found")
+                return
+
+            # 最後にチェックしたチャンネルの最近のメッセージを取得
+            recent_messages = await self._get_recent_messages(channel)
+            
+            # ランダムに声かけか話題についての質問を選択
+            if random.random() < 0.5 and recent_messages:
+                # 話題について質問
+                messages_text = "\n".join(recent_messages[-5:])
+                prompt = f"""
+                以下の最近のチャット内容から興味深い話題を1つ選び、
+                {infant.display_name}さんに意見を求めるメッセージを作成してください：
+
+                最近のチャット：
+                {messages_text}
+
+                条件：
+                - フレンドリーで親しみやすい口調で
+                - 具体的な質問を含める
+                - 短めの文章（100文字以内）
+                - 絵文字を1-2個使用
+                - 時間帯に応じた挨拶を含める（現在の時間: {jst_hour}時）
+                """
+            else:
+                # 一般的な声かけ
+                prompt = f"""
+                以下の条件で、メンバーに声をかけるメッセージを作成してください：
+                - メンバー: {infant.display_name}
+                - フレンドリーで親しみやすい口調で
+                - 調子を尋ねる
+                - 短めの文章（100文字以内）
+                - 絵文字を1-2個使用
+                - 時間帯に応じた挨拶を含める（現在の時間: {jst_hour}時）
+                """
+
+            response = await self._generate_response(prompt)
+            await channel.send(f"{infant.mention} {response}")
+            self.last_check_channel = channel
+            self.logger.info(f"Periodic check completed - messaged {infant.display_name}")
+
+        except Exception as e:
+            self.logger.error(f"Error in periodic_infant_check: {e}")
+
+    @periodic_infant_check.before_loop
+    async def before_periodic_check(self):
+        """Botが準備できるまで待機"""
+        await self.bot.wait_until_ready()
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -186,7 +195,6 @@ class Gemini(commands.Cog):
 
         if arguments.lower() == 'reset':
             self.logger.info(f"{author_name} is resetting the chat")
-            self.chat_history = []
             self.chat = self.model.start_chat(history=self.initial_prompt)
             await reply_func.reply('チャットの履歴をリセットしたお')
             return
@@ -201,46 +209,146 @@ class Gemini(commands.Cog):
         # Reverse messages to show oldest first
         messages.reverse()
         
-        # Create context with previous messages and chat history
-        context_parts = []
-        if self.chat_history:
-            context_parts.append("Previous conversation:\n" + "\n".join(self.chat_history))
-        if messages:
-            context_parts.append("Recent channel messages:\n" + "\n".join(messages))
-        context_parts.append("Current message:")
-        context = "\n\n".join(context_parts)
+        # Create context with previous messages
+        context = "Previous messages:\n" + "\n".join(messages) + "\n\nCurrent message:\n"
         
-        user_message = f"{author_name}: {arguments}"
         self.logger.info(f"{author_name} is sending message: {arguments}")
-        
-        response = await self.send_chat_message(f"{context}\n{user_message}")
+        response = await self.send_chat_message(f"{context}{author_name}: {arguments}")
         self.logger.info(f"Gemini response: {response}")
         
-        # Update chat history
-        self.chat_history.append(user_message)
         response_text = response.text if hasattr(response, 'text') else str(response)
-        self.chat_history.append(f"Assistant: {response_text}")
-        
-        # Limit chat history size to prevent token overflow
-        while len("\n".join(self.chat_history)) > self.MAX_HISTORY_TOKENS:
-            self.chat_history.pop(0)
-            self.chat_history.pop(0)  # Remove pairs of messages
-        
-        # Split long messages for Discord
-        if len(response_text) > 2000:
+        if len(response_text) > 2000:  # Discord message length limit
+            # Split long messages
             chunks = [response_text[i:i+1990] for i in range(0, len(response_text), 1990)]
             for chunk in chunks:
                 await reply_func.reply(chunk)
         else:
             await reply_func.reply(response_text)
 
+    async def send_chat_message(self, msg):
+        """Asynchronously send a message to the chat with retry logic"""
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            try:
+                # Wrap the synchronous API call in an executor to make it async
+                response = await asyncio.get_event_loop().run_in_executor(
+                    None, self.chat.send_message, msg
+                )
+                return response
+            except asyncio.TimeoutError:
+                if attempt == max_attempts:
+                    return f"Timeout error: The request took too long to complete after {max_attempts} attempts."
+                await asyncio.sleep(1)  # Add delay between retries
+            except Exception as e:
+                if attempt == max_attempts:
+                    self.logger.error(f"Error in send_chat_message: {str(e)}")
+                    return f"An error occurred after {max_attempts} attempts: {str(e)}"
+                await asyncio.sleep(1)
+
     @commands.command()
-    @commands.has_any_role("Parent", "Toddler")
-    async def show_history(self, ctx):
-        """Show current chat history"""
-        if not self.chat_history:
-            await ctx.reply("チャット履歴はありません。")
+    @commands.has_role("Parent")
+    async def set_check_interval(self, ctx, hours: float):
+        """定期チェックの間隔を設定する"""
+        if hours < 0.5 or hours > 24:
+            await ctx.reply("間隔は0.5時間から24時間の間で設定してください。")
             return
         
-        history_text = "\n".join(self.chat_history[-10:])  # Show last 10 exchanges
-        await ctx.reply(f'最近のチャット履歴:\n```\n{history_text}\n```')
+        self.periodic_infant_check.change_interval(hours=hours)
+        await ctx.reply(f"定期チェックの間隔を{hours}時間に設定しました。")
+
+    @commands.command()
+    @commands.has_role("Parent")
+    async def check_status(self, ctx):
+        """定期チェックの状態を確認する"""
+        status = "実行中" if self.periodic_infant_check.is_running() else "停止中"
+        interval = self.periodic_infant_check.hours
+        next_iteration = self.periodic_infant_check.next_iteration
+        
+        if next_iteration:
+            # UTCから日本時間に変換
+            jst_next = (next_iteration + datetime.timedelta(hours=9)).strftime('%Y-%m-%d %H:%M:%S')
+            await ctx.reply(f"定期チェックの状態:\n"
+                          f"- 状態: {status}\n"
+                          f"- 間隔: {interval}時間\n"
+                          f"- 次回実行: {jst_next}")
+        else:
+            await ctx.reply(f"定期チェックの状態:\n"
+                          f"- 状態: {status}\n"
+                          f"- 間隔: {interval}時間\n"
+                          f"- 次回実行: 未定")
+
+    async def _get_recent_messages(self, channel, limit=10) -> List[str]:
+        """Get recent messages from the channel"""
+        messages = []
+        async for message in channel.history(limit=limit):
+            if not message.author.bot and message.content:  # Skip bot messages and empty messages
+                messages.append(message.content)
+        return messages
+
+    async def _get_random_infant(self, guild) -> Optional[discord.Member]:
+        """Get a random member with Infant role"""
+        infant_role = discord.utils.get(guild.roles, name="Infant")
+        if not infant_role:
+            return None
+        
+        infant_members = [member for member in guild.members 
+                         if infant_role in member.roles and not member.bot]
+        return random.choice(infant_members) if infant_members else None
+
+    @commands.command()
+    @commands.has_role("Parent")
+    async def check_infant(self, ctx):
+        """ランダムに選んだInfantメンバーに声をかけます"""
+        async with ctx.typing():
+            infant = await self._get_random_infant(ctx.guild)
+            if not infant:
+                await ctx.reply("Infantロールのメンバーが見つかりませんでした。")
+                return
+
+            prompt = f"""
+            以下の条件で、メンバーに声をかけるメッセージを作成してください：
+            - メンバー: {infant.display_name}
+            - フレンドリーで親しみやすい口調で
+            - 調子を尋ねる
+            - 短めの文章（100文字以内）
+            - 絵文字を1-2個使用
+            """
+            
+            response = await self._generate_response(prompt)
+            await ctx.send(f"{infant.mention} {response}")
+
+    @commands.command()
+    @commands.has_role("Parent")
+    async def discuss_topic(self, ctx):
+        """最近のメッセージから話題を見つけて、Infantメンバーに意見を聞きます"""
+        async with ctx.typing():
+            # 最近のメッセージを取得
+            recent_messages = await self._get_recent_messages(ctx.channel)
+            if not recent_messages:
+                await ctx.reply("最近のメッセージが見つかりませんでした。")
+                return
+
+            # ランダムなInfantメンバーを取得
+            infant = await self._get_random_infant(ctx.guild)
+            if not infant:
+                await ctx.reply("Infantロールのメンバーが見つかりませんでした。")
+                return
+
+            # 話題を抽出してプロンプトを作成
+            messages_text = "\n".join(recent_messages[-5:])  # 直近5件のメッセージを使用
+            prompt = f"""
+            以下の最近のチャット内容から興味深い話題を1つ選び、
+            {infant.display_name}さんに意見を求めるメッセージを作成してください：
+
+            最近のチャット：
+            {messages_text}
+
+            条件：
+            - フレンドリーで親しみやすい口調で
+            - 具体的な質問を含める
+            - 短めの文章（100文字以内）
+            - 絵文字を1-2個使用
+            """
+
+            response = await self._generate_response(prompt)
+            await ctx.send(f"{infant.mention} {response}")
