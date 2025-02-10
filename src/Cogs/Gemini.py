@@ -16,6 +16,7 @@ class Gemini(commands.Cog):
         {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
         {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
     ]
+    MESSAGE_HISTORY_LIMIT = 10  # Default message history limit
 
     def __init__(self, bot, api_key, logger, initial_prompt):
         self.bot = bot
@@ -115,6 +116,16 @@ class Gemini(commands.Cog):
             self.logger.error(f"Error retrieving messages: {str(e)}")
             await ctx.send("Failed to retrieve messages. Please try again later.")
 
+    @commands.command()
+    @commands.has_any_role("Parent", "Toddler")
+    async def set_history_limit(self, ctx, limit: int):
+        """Set the number of previous messages to include in chat context"""
+        if limit < 1 or limit > 50:
+            await ctx.reply('メッセージ履歴の制限は1から50の間で設定してください。')
+            return
+        self.MESSAGE_HISTORY_LIMIT = limit
+        await ctx.reply(f'メッセージ履歴の制限を{limit}件に設定しました。')
+
     async def process_message(self, arguments, reply_func, author_name):
         if not arguments:
             await reply_func.reply('どしたん?話きこか?')
@@ -126,10 +137,10 @@ class Gemini(commands.Cog):
             await reply_func.reply('チャットの履歴をリセットしたお')
             return
 
-        # Fetch last 10 messages from the channel
+        # Fetch messages from the channel using the configurable limit
         channel = reply_func.channel if hasattr(reply_func, 'channel') else reply_func.message.channel
         messages = []
-        async for msg in channel.history(limit=10):
+        async for msg in channel.history(limit=self.MESSAGE_HISTORY_LIMIT):
             if msg.author != self.bot.user:  # Only include user messages
                 messages.append(f"{msg.author.display_name}: {msg.content}")
         
