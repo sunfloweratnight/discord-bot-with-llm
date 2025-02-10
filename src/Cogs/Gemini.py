@@ -3,6 +3,7 @@ import discord
 import google.generativeai as genai
 from discord.ext import commands
 import asyncio
+import os
 
 from src import Entities, Session
 from src.Cogs.Utils import sanitize_args
@@ -17,6 +18,8 @@ class Gemini(commands.Cog):
         {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
     ]
     MESSAGE_HISTORY_LIMIT = 50  # Default message history limit
+    DEFAULT_MODEL = "gemini-2.0-flash-exp"
+    AVAILABLE_MODELS = ["gemini-pro", "gemini-2.0-flash-exp"]
 
     def __init__(self, bot, api_key, logger, initial_prompt):
         self.bot = bot
@@ -24,22 +27,70 @@ class Gemini(commands.Cog):
         self.initial_prompt = [
             {"role": "user", "parts": [initial_prompt]}
         ]
+        self.temperature = float(os.getenv('GEMINI_TEMPERATURE', '1.0'))
+        self.top_p = float(os.getenv('GEMINI_TOP_P', '0.95'))
+        self.top_k = int(os.getenv('GEMINI_TOP_K', '40'))
+        self.max_output_tokens = int(os.getenv('GEMINI_MAX_OUTPUT_TOKENS', '8192'))
+        self.model_name = os.getenv('GEMINI_MODEL', self.DEFAULT_MODEL)
 
         genai.configure(api_key=api_key)
-        generation_config = {
-            "temperature": 1,
-            "top_p": 0.95,
-            "top_k": 40,
-            "max_output_tokens": 8192,
+        self.generation_config = {
+            "temperature": self.temperature,
+            "top_p": self.top_p,
+            "top_k": self.top_k,
+            "max_output_tokens": self.max_output_tokens,
         }
         
-        self.model = genai.GenerativeModel(
-            model_name="gemini-2.0-flash-exp",  # Updated to use stable release model
-            generation_config=generation_config,
-            safety_settings=self.SAFETY_SETTINGS  # Added safety settings
+        self.model = self._create_model()
+        self.chat = self.model.start_chat(history=self.initial_prompt)
+
+    def _create_model(self):
+        """Create a new model instance with current configuration"""
+        return genai.GenerativeModel(
+            model_name=self.model_name,
+            generation_config=self.generation_config,
+            safety_settings=self.SAFETY_SETTINGS
         )
 
+    @commands.command()
+    @commands.has_role("Parent")
+    async def set_model(self, ctx, model_name: str):
+        """Set the Gemini model to use"""
+        if model_name not in self.AVAILABLE_MODELS:
+            available_models = ", ".join(self.AVAILABLE_MODELS)
+            await ctx.reply(f'利用可能なモデル: {available_models}')
+            return
+        self.model_name = model_name
+        self.model = self._create_model()
         self.chat = self.model.start_chat(history=self.initial_prompt)
+        await ctx.reply(f'モデルを {model_name} に変更しました。チャット履歴はリセットされました。')
+
+    @commands.command()
+    @commands.has_role("Parent")
+    async def set_temperature(self, ctx, temp: float):
+        """Set the temperature for text generation (0.0 to 1.0)"""
+        if temp < 0.0 or temp > 1.0:
+            await ctx.reply('temperatureは0.0から1.0の間で設定してください。')
+            return
+        self.temperature = temp
+        self.generation_config["temperature"] = temp
+        self.model = self._create_model()
+        await ctx.reply(f'temperatureを{temp}に設定しました。')
+
+    @commands.command()
+    @commands.has_any_role("Parent", "Toddler")
+    async def show_config(self, ctx):
+        """Show current model configuration"""
+        config = {
+            "モデル": self.model_name,
+            "Temperature": self.temperature,
+            "Top P": self.top_p,
+            "Top K": self.top_k,
+            "最大出力トークン": self.max_output_tokens,
+            "メッセージ履歴制限": self.MESSAGE_HISTORY_LIMIT
+        }
+        config_text = "\n".join([f"{k}: {v}" for k, v in config.items()])
+        await ctx.reply(f'現在の設定:\n```\n{config_text}\n```')
 
     async def send_chat_message(self, msg):
         """Asynchronously send a message to the chat with retry logic"""
