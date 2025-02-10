@@ -16,7 +16,7 @@ class Gemini(commands.Cog):
         {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
         {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
     ]
-    MESSAGE_HISTORY_LIMIT = 10  # Default message history limit
+    MESSAGE_HISTORY_LIMIT = 50  # Default message history limit
 
     def __init__(self, bot, api_key, logger, initial_prompt):
         self.bot = bot
