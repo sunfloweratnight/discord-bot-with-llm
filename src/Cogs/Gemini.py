@@ -117,7 +117,7 @@ class Gemini(commands.Cog):
 
     async def process_message(self, arguments, reply_func, author_name):
         if not arguments:
-            await reply_func.reply('どしたん？話きこか？')
+            await reply_func.reply('どしたん?話きこか?')
             return
 
         if arguments.lower() == 'reset':
@@ -126,8 +126,21 @@ class Gemini(commands.Cog):
             await reply_func.reply('チャットの履歴をリセットしたお')
             return
 
+        # Fetch last 10 messages from the channel
+        channel = reply_func.channel if hasattr(reply_func, 'channel') else reply_func.message.channel
+        messages = []
+        async for msg in channel.history(limit=10):
+            if msg.author != self.bot.user:  # Only include user messages
+                messages.append(f"{msg.author.display_name}: {msg.content}")
+        
+        # Reverse messages to show oldest first
+        messages.reverse()
+        
+        # Create context with previous messages
+        context = "Previous messages:\n" + "\n".join(messages) + "\n\nCurrent message:\n"
+        
         self.logger.info(f"{author_name} is sending message: {arguments}")
-        response = await self.send_chat_message(f"{author_name}: {arguments}")
+        response = await self.send_chat_message(f"{context}{author_name}: {arguments}")
         self.logger.info(f"Gemini response: {response}")
         
         response_text = response.text if hasattr(response, 'text') else str(response)
