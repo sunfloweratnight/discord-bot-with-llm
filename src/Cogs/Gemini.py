@@ -20,6 +20,7 @@ class Gemini(commands.Cog):
     MESSAGE_HISTORY_LIMIT = 50  # Default message history limit
     DEFAULT_MODEL = "gemini-2.0-flash-exp"
     AVAILABLE_MODELS = ["gemini-pro", "gemini-2.0-flash-exp"]
+    MAX_HISTORY_TOKENS = 30000  # Approximate token limit for history
 
     def __init__(self, bot, api_key, logger, initial_prompt):
         self.bot = bot
@@ -27,6 +28,7 @@ class Gemini(commands.Cog):
         self.initial_prompt = [
             {"role": "user", "parts": [initial_prompt]}
         ]
+        self.chat_history = []  # Store chat history
         self.temperature = float(os.getenv('GEMINI_TEMPERATURE', '1.0'))
         self.top_p = float(os.getenv('GEMINI_TOP_P', '0.95'))
         self.top_k = int(os.getenv('GEMINI_TOP_K', '40'))
@@ -184,6 +186,7 @@ class Gemini(commands.Cog):
 
         if arguments.lower() == 'reset':
             self.logger.info(f"{author_name} is resetting the chat")
+            self.chat_history = []
             self.chat = self.model.start_chat(history=self.initial_prompt)
             await reply_func.reply('チャットの履歴をリセットしたお')
             return
@@ -198,18 +201,46 @@ class Gemini(commands.Cog):
         # Reverse messages to show oldest first
         messages.reverse()
         
-        # Create context with previous messages
-        context = "Previous messages:\n" + "\n".join(messages) + "\n\nCurrent message:\n"
+        # Create context with previous messages and chat history
+        context_parts = []
+        if self.chat_history:
+            context_parts.append("Previous conversation:\n" + "\n".join(self.chat_history))
+        if messages:
+            context_parts.append("Recent channel messages:\n" + "\n".join(messages))
+        context_parts.append("Current message:")
+        context = "\n\n".join(context_parts)
         
+        user_message = f"{author_name}: {arguments}"
         self.logger.info(f"{author_name} is sending message: {arguments}")
-        response = await self.send_chat_message(f"{context}{author_name}: {arguments}")
+        
+        response = await self.send_chat_message(f"{context}\n{user_message}")
         self.logger.info(f"Gemini response: {response}")
         
+        # Update chat history
+        self.chat_history.append(user_message)
         response_text = response.text if hasattr(response, 'text') else str(response)
-        if len(response_text) > 2000:  # Discord message length limit
-            # Split long messages
+        self.chat_history.append(f"Assistant: {response_text}")
+        
+        # Limit chat history size to prevent token overflow
+        while len("\n".join(self.chat_history)) > self.MAX_HISTORY_TOKENS:
+            self.chat_history.pop(0)
+            self.chat_history.pop(0)  # Remove pairs of messages
+        
+        # Split long messages for Discord
+        if len(response_text) > 2000:
             chunks = [response_text[i:i+1990] for i in range(0, len(response_text), 1990)]
             for chunk in chunks:
                 await reply_func.reply(chunk)
         else:
             await reply_func.reply(response_text)
+
+    @commands.command()
+    @commands.has_any_role("Parent", "Toddler")
+    async def show_history(self, ctx):
+        """Show current chat history"""
+        if not self.chat_history:
+            await ctx.reply("チャット履歴はありません。")
+            return
+        
+        history_text = "\n".join(self.chat_history[-10:])  # Show last 10 exchanges
+        await ctx.reply(f'最近のチャット履歴:\n```\n{history_text}\n```')
