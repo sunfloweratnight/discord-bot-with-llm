@@ -28,6 +28,7 @@ class Gemini(commands.Cog):
         self.initial_prompt = [
             {"role": "user", "parts": [initial_prompt]}
         ]
+        self.BABY_ROOM_CATEGORY_ID = 1150088658947407952  # 赤ちゃん部屋のカテゴリーID
 
         genai.configure(api_key=api_key)
         generation_config = {
@@ -52,7 +53,7 @@ class Gemini(commands.Cog):
         """Cogがアンロードされるときにタスクを停止"""
         self.periodic_infant_check.cancel()
 
-    @tasks.loop(hours=3)  # 3時間ごとに実行
+    @tasks.loop(minutes=30)  # 30分ごとに実行
     async def periodic_infant_check(self):
         """定期的にInfantメンバーをチェックする"""
         try:
@@ -61,17 +62,25 @@ class Gemini(commands.Cog):
             if 0 <= jst_hour < 6:
                 return
 
-            guild = self.bot.get_guild(settings.GUILD_ID)
+            guild = self.bot.guilds[0]  # Assuming bot is in only one guild
             if not guild:
                 self.logger.error("Guild not found")
                 return
 
-            # チャンネルを取得（設定ファイルから適切なチャンネルIDを使用）
-            channel = guild.get_channel(settings.MINNA_BUNKO_CHANNEL_ID)  # または他の適切なチャンネルID
-            if not channel:
-                self.logger.error("Channel not found")
+            # 赤ちゃん部屋カテゴリーのチャンネルをランダムに選択
+            category = discord.utils.get(guild.categories, id=self.BABY_ROOM_CATEGORY_ID)
+            if not category:
+                self.logger.error("Baby room category not found")
                 return
 
+            # テキストチャンネルのみをフィルタリング
+            text_channels = [c for c in category.channels if isinstance(c, discord.TextChannel)]
+            if not text_channels:
+                self.logger.error("No text channels found in baby room category")
+                return
+
+            channel = random.choice(text_channels)
+            
             infant = await self._get_random_infant(guild)
             if not infant:
                 self.logger.info("No Infant members found")
@@ -80,40 +89,28 @@ class Gemini(commands.Cog):
             # 最後にチェックしたチャンネルの最近のメッセージを取得
             recent_messages = await self._get_recent_messages(channel)
             
-            # ランダムに声かけか話題についての質問を選択
-            if random.random() < 0.5 and recent_messages:
-                # 話題について質問
-                messages_text = "\n".join(recent_messages[-5:])
-                prompt = f"""
-                以下の最近のチャット内容から興味深い話題を1つ選び、
-                {infant.display_name}さんに意見を求めるメッセージを作成してください：
+            # 話題について質問するプロンプトを作成
+            messages_text = "\n".join(recent_messages[-5:]) if recent_messages else ""
+            prompt = f"""
+            以下の最近のチャット内容から興味深い話題を1つ選び、
+            {infant.display_name}さんに意見を求めるメッセージを作成してください：
 
-                最近のチャット：
-                {messages_text}
+            最近のチャット：
+            {messages_text}
 
-                条件：
-                - フレンドリーで親しみやすい口調で
-                - 具体的な質問を含める
-                - 短めの文章（100文字以内）
-                - 絵文字を1-2個使用
-                - 時間帯に応じた挨拶を含める（現在の時間: {jst_hour}時）
-                """
-            else:
-                # 一般的な声かけ
-                prompt = f"""
-                以下の条件で、メンバーに声をかけるメッセージを作成してください：
-                - メンバー: {infant.display_name}
-                - フレンドリーで親しみやすい口調で
-                - 調子を尋ねる
-                - 短めの文章（100文字以内）
-                - 絵文字を1-2個使用
-                - 時間帯に応じた挨拶を含める（現在の時間: {jst_hour}時）
-                """
+            条件：
+            - フレンドリーで親しみやすい口調で
+            - 具体的な質問を含める
+            - 短めの文章（100文字以内）
+            - 絵文字を1-2個使用
+            - 時間帯に応じた挨拶を含める（現在の時間: {jst_hour}時）
+            - チャットが空の場合は、一般的な話題（趣味、好きなもの、最近のできごとなど）について質問
+            """
 
             response = await self._generate_response(prompt)
             await channel.send(f"{infant.mention} {response}")
             self.last_check_channel = channel
-            self.logger.info(f"Periodic check completed - messaged {infant.display_name}")
+            self.logger.info(f"Periodic check completed - messaged {infant.display_name} in {channel.name}")
 
         except Exception as e:
             self.logger.error(f"Error in periodic_infant_check: {e}")
@@ -260,14 +257,14 @@ class Gemini(commands.Cog):
 
     @commands.command()
     @commands.has_role("Parent")
-    async def set_check_interval(self, ctx, hours: float):
+    async def set_check_interval(self, ctx, minutes: float):
         """定期チェックの間隔を設定する"""
-        if hours < 0.5 or hours > 24:
-            await ctx.reply("間隔は0.5時間から24時間の間で設定してください。")
+        if minutes < 10 or minutes > 1440:  # 10分から24時間（1440分）の間
+            await ctx.reply("間隔は10分から1440分（24時間）の間で設定してください。")
             return
         
-        self.periodic_infant_check.change_interval(hours=hours)
-        await ctx.reply(f"定期チェックの間隔を{hours}時間に設定しました。")
+        self.periodic_infant_check.change_interval(minutes=minutes)
+        await ctx.reply(f"定期チェックの間隔を{minutes}分に設定しました。")
 
     @commands.command()
     @commands.has_role("Parent")
