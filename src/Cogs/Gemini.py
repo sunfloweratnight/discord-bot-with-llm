@@ -289,14 +289,89 @@ class Gemini(commands.Cog):
 
     @commands.command()
     @commands.has_role("Parent")
-    async def sync_permissions(self, ctx, channel_id: Optional[int] = None):
+    async def list_channels(self, ctx, category_id: Optional[int] = None):
+        """カテゴリーのチャンネル一覧と権限同期状態を表示"""
+        try:
+            if category_id:
+                # 特定のカテゴリーのチャンネルを表示
+                category = discord.utils.get(ctx.guild.categories, id=category_id)
+                if not category:
+                    await ctx.reply(f"指定されたカテゴリー(ID: {category_id})が見つかりませんでした。")
+                    return
+                
+                channels_info = [f"📁 {category.name} のチャンネル一覧:"]
+                for channel in category.channels:
+                    is_synced = channel.permissions_synced
+                    sync_status = "🔄" if is_synced else "❌"
+                    channels_info.append(f"{sync_status} {channel.name} (ID: {channel.id})")
+            else:
+                # すべてのカテゴリーとチャンネルを表示
+                channels_info = ["📋 サーバーのチャンネル一覧:"]
+                for category in ctx.guild.categories:
+                    channels_info.append(f"\n📁 {category.name} (ID: {category.id}):")
+                    for channel in category.channels:
+                        is_synced = channel.permissions_synced
+                        sync_status = "🔄" if is_synced else "❌"
+                        channels_info.append(f"  {sync_status} {channel.name} (ID: {channel.id})")
+
+            # メッセージが2000文字を超える場合は分割して送信
+            message = "\n".join(channels_info)
+            if len(message) > 1990:
+                chunks = [message[i:i+1990] for i in range(0, len(message), 1990)]
+                for chunk in chunks:
+                    await ctx.reply(f"```\n{chunk}\n```")
+            else:
+                await ctx.reply(f"```\n{message}\n```")
+
+        except Exception as e:
+            self.logger.error(f"Error in list_channels: {e}")
+            await ctx.reply("チャンネル一覧の取得中にエラーが発生しました。")
+
+    @commands.command()
+    @commands.has_role("Parent")
+    async def list_categories(self, ctx):
+        """サーバーのカテゴリー一覧を表示"""
+        try:
+            categories = ctx.guild.categories
+            if not categories:
+                await ctx.reply("カテゴリーが見つかりませんでした。")
+                return
+
+            category_info = ["📋 サーバーのカテゴリー一覧:"]
+            for category in categories:
+                channel_count = len(category.channels)
+                category_info.append(f"📁 {category.name} (ID: {category.id}) - チャンネル数: {channel_count}")
+
+            await ctx.reply("\n".join(category_info))
+
+        except Exception as e:
+            self.logger.error(f"Error in list_categories: {e}")
+            await ctx.reply("カテゴリー一覧の取得中にエラーが発生しました。")
+
+    @commands.command()
+    @commands.has_role("Parent")
+    async def sync_permissions(self, ctx, category_id: Optional[int] = None, channel_id: Optional[int] = None):
         """チャンネルの権限をカテゴリーの権限に同期させる"""
         try:
-            # カテゴリーを取得
-            category = discord.utils.get(ctx.guild.categories, id=self.BABY_ROOM_CATEGORY_ID)
-            if not category:
-                await ctx.reply("赤ちゃん部屋カテゴリーが見つかりませんでした。")
-                return
+            if channel_id and not category_id:
+                # チャンネルIDのみ指定された場合、そのチャンネルを検索
+                channel = ctx.guild.get_channel(channel_id)
+                if not channel:
+                    await ctx.reply(f"指定されたチャンネル(ID: {channel_id})が見つかりませんでした。")
+                    return
+                category = channel.category
+            elif category_id:
+                # カテゴリーIDが指定された場合
+                category = discord.utils.get(ctx.guild.categories, id=category_id)
+                if not category:
+                    await ctx.reply(f"指定されたカテゴリー(ID: {category_id})が見つかりませんでした。")
+                    return
+            else:
+                # 両方とも指定されていない場合は赤ちゃん部屋カテゴリーを使用
+                category = discord.utils.get(ctx.guild.categories, id=self.BABY_ROOM_CATEGORY_ID)
+                if not category:
+                    await ctx.reply("赤ちゃん部屋カテゴリーが見つかりませんでした。")
+                    return
 
             if channel_id:
                 # 特定のチャンネルのみ同期
@@ -319,7 +394,7 @@ class Gemini(commands.Cog):
                         failed_channels.append(channel.name)
 
                 # 結果を報告
-                response = ["権限の同期結果:"]
+                response = [f"カテゴリー「{category.name}」の権限同期結果:"]
                 if synced_channels:
                     response.append(f"✅ 同期成功: {', '.join(synced_channels)}")
                 if failed_channels:
@@ -329,47 +404,6 @@ class Gemini(commands.Cog):
         except Exception as e:
             self.logger.error(f"Error in sync_permissions: {e}")
             await ctx.reply("権限の同期中にエラーが発生しました。")
-
-    @commands.command()
-    @commands.has_role("Parent")
-    async def list_channels(self, ctx):
-        """赤ちゃん部屋カテゴリーのチャンネル一覧と権限同期状態を表示"""
-        try:
-            category = discord.utils.get(ctx.guild.categories, id=self.BABY_ROOM_CATEGORY_ID)
-            if not category:
-                await ctx.reply("赤ちゃん部屋カテゴリーが見つかりませんでした。")
-                return
-
-            channels_info = ["赤ちゃん部屋のチャンネル一覧:"]
-            for channel in category.channels:
-                # チャンネルの権限がカテゴリーと同じかチェック
-                is_synced = channel.permissions_synced
-                sync_status = "🔄" if is_synced else "❌"
-                channels_info.append(f"{sync_status} {channel.name} (ID: {channel.id})")
-
-            await ctx.reply("\n".join(channels_info))
-
-        except Exception as e:
-            self.logger.error(f"Error in list_channels: {e}")
-            await ctx.reply("チャンネル一覧の取得中にエラーが発生しました。")
-
-    async def _get_recent_messages(self, channel, limit=10) -> List[str]:
-        """Get recent messages from the channel"""
-        messages = []
-        async for message in channel.history(limit=limit):
-            if not message.author.bot and message.content:  # Skip bot messages and empty messages
-                messages.append(message.content)
-        return messages
-
-    async def _get_random_infant(self, guild) -> Optional[discord.Member]:
-        """Get a random member with Infant role"""
-        infant_role = discord.utils.get(guild.roles, name="Infant")
-        if not infant_role:
-            return None
-        
-        infant_members = [member for member in guild.members 
-                         if infant_role in member.roles and not member.bot]
-        return random.choice(infant_members) if infant_members else None
 
     @commands.command()
     @commands.has_role("Parent")
@@ -428,3 +462,21 @@ class Gemini(commands.Cog):
 
             response = await self._generate_response(prompt)
             await ctx.send(f"{infant.mention} {response}")
+
+    async def _get_recent_messages(self, channel, limit=10) -> List[str]:
+        """Get recent messages from the channel"""
+        messages = []
+        async for message in channel.history(limit=limit):
+            if not message.author.bot and message.content:  # Skip bot messages and empty messages
+                messages.append(message.content)
+        return messages
+
+    async def _get_random_infant(self, guild) -> Optional[discord.Member]:
+        """Get a random member with Infant role"""
+        infant_role = discord.utils.get(guild.roles, name="Infant")
+        if not infant_role:
+            return None
+        
+        infant_members = [member for member in guild.members 
+                         if infant_role in member.roles and not member.bot]
+        return random.choice(infant_members) if infant_members else None
