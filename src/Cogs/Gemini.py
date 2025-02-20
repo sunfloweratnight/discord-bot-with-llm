@@ -350,6 +350,71 @@ class Gemini(commands.Cog):
 
     @commands.command()
     @commands.has_role("Parent")
+    async def sync_all_permissions(self, ctx):
+        """サーバー内のすべてのチャンネルの権限をそれぞれのカテゴリーの権限に同期させる"""
+        try:
+            results = {}  # カテゴリーごとの結果を保存
+            total_synced = 0
+            total_failed = 0
+
+            # 進捗メッセージを送信
+            status_msg = await ctx.reply("🔄 すべてのチャンネルの権限を同期中...")
+
+            # すべてのカテゴリーを処理
+            for category in ctx.guild.categories:
+                synced_channels = []
+                failed_channels = []
+
+                for channel in category.channels:
+                    try:
+                        await channel.edit(sync_permissions=True)
+                        synced_channels.append(channel.name)
+                        total_synced += 1
+                    except Exception as e:
+                        self.logger.error(f"Error syncing permissions for channel {channel.name} in category {category.name}: {e}")
+                        failed_channels.append(channel.name)
+                        total_failed += 1
+
+                results[category.name] = {
+                    "synced": synced_channels,
+                    "failed": failed_channels
+                }
+
+            # 結果をフォーマット
+            response = ["📋 権限同期の結果:"]
+            response.append(f"\n📊 統計:\n- ✅ 成功: {total_synced}\n- ❌ 失敗: {total_failed}")
+
+            for category_name, result in results.items():
+                if result["synced"] or result["failed"]:
+                    response.append(f"\n📁 {category_name}:")
+                    if result["synced"]:
+                        response.append(f"  ✅ 同期成功: {', '.join(result['synced'])}")
+                    if result["failed"]:
+                        response.append(f"  ❌ 同期失敗: {', '.join(result['failed'])}")
+
+            # 結果が長い場合は分割して送信
+            formatted_response = "\n".join(response)
+            if len(formatted_response) > 1990:
+                # 進捗メッセージを更新
+                await status_msg.edit(content="✅ 同期完了！詳細な結果を送信します...")
+                
+                # 結果を分割して送信
+                chunks = [formatted_response[i:i+1990] for i in range(0, len(formatted_response), 1990)]
+                for i, chunk in enumerate(chunks):
+                    if i == 0:
+                        await ctx.reply(f"```\n{chunk}\n```")
+                    else:
+                        await ctx.send(f"```\n{chunk}\n```")
+            else:
+                # 進捗メッセージを結果で更新
+                await status_msg.edit(content=f"```\n{formatted_response}\n```")
+
+        except Exception as e:
+            self.logger.error(f"Error in sync_all_permissions: {e}")
+            await ctx.reply("❌ 権限の同期中にエラーが発生しました。")
+
+    @commands.command()
+    @commands.has_role("Parent")
     async def sync_permissions(self, ctx, category_id: Optional[int] = None, channel_id: Optional[int] = None):
         """チャンネルの権限をカテゴリーの権限に同期させる"""
         try:
