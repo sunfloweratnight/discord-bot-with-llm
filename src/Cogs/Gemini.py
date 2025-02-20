@@ -271,7 +271,7 @@ class Gemini(commands.Cog):
     async def check_status(self, ctx):
         """定期チェックの状態を確認する"""
         status = "実行中" if self.periodic_infant_check.is_running() else "停止中"
-        interval = self.periodic_infant_check.hours
+        interval = self.periodic_infant_check.minutes  # Changed from hours to minutes
         next_iteration = self.periodic_infant_check.next_iteration
         
         if next_iteration:
@@ -279,13 +279,79 @@ class Gemini(commands.Cog):
             jst_next = (next_iteration + datetime.timedelta(hours=9)).strftime('%Y-%m-%d %H:%M:%S')
             await ctx.reply(f"定期チェックの状態:\n"
                           f"- 状態: {status}\n"
-                          f"- 間隔: {interval}時間\n"
+                          f"- 間隔: {interval}分\n"
                           f"- 次回実行: {jst_next}")
         else:
             await ctx.reply(f"定期チェックの状態:\n"
                           f"- 状態: {status}\n"
-                          f"- 間隔: {interval}時間\n"
+                          f"- 間隔: {interval}分\n"
                           f"- 次回実行: 未定")
+
+    @commands.command()
+    @commands.has_role("Parent")
+    async def sync_permissions(self, ctx, channel_id: Optional[int] = None):
+        """チャンネルの権限をカテゴリーの権限に同期させる"""
+        try:
+            # カテゴリーを取得
+            category = discord.utils.get(ctx.guild.categories, id=self.BABY_ROOM_CATEGORY_ID)
+            if not category:
+                await ctx.reply("赤ちゃん部屋カテゴリーが見つかりませんでした。")
+                return
+
+            if channel_id:
+                # 特定のチャンネルのみ同期
+                channel = discord.utils.get(category.channels, id=channel_id)
+                if not channel:
+                    await ctx.reply(f"指定されたチャンネル(ID: {channel_id})が見つかりませんでした。")
+                    return
+                await channel.edit(sync_permissions=True)
+                await ctx.reply(f"チャンネル {channel.name} の権限をカテゴリーと同期しました。")
+            else:
+                # カテゴリー内のすべてのチャンネルを同期
+                synced_channels = []
+                failed_channels = []
+                for channel in category.channels:
+                    try:
+                        await channel.edit(sync_permissions=True)
+                        synced_channels.append(channel.name)
+                    except Exception as e:
+                        self.logger.error(f"Error syncing permissions for channel {channel.name}: {e}")
+                        failed_channels.append(channel.name)
+
+                # 結果を報告
+                response = ["権限の同期結果:"]
+                if synced_channels:
+                    response.append(f"✅ 同期成功: {', '.join(synced_channels)}")
+                if failed_channels:
+                    response.append(f"❌ 同期失敗: {', '.join(failed_channels)}")
+                await ctx.reply("\n".join(response))
+
+        except Exception as e:
+            self.logger.error(f"Error in sync_permissions: {e}")
+            await ctx.reply("権限の同期中にエラーが発生しました。")
+
+    @commands.command()
+    @commands.has_role("Parent")
+    async def list_channels(self, ctx):
+        """赤ちゃん部屋カテゴリーのチャンネル一覧と権限同期状態を表示"""
+        try:
+            category = discord.utils.get(ctx.guild.categories, id=self.BABY_ROOM_CATEGORY_ID)
+            if not category:
+                await ctx.reply("赤ちゃん部屋カテゴリーが見つかりませんでした。")
+                return
+
+            channels_info = ["赤ちゃん部屋のチャンネル一覧:"]
+            for channel in category.channels:
+                # チャンネルの権限がカテゴリーと同じかチェック
+                is_synced = channel.permissions_synced
+                sync_status = "🔄" if is_synced else "❌"
+                channels_info.append(f"{sync_status} {channel.name} (ID: {channel.id})")
+
+            await ctx.reply("\n".join(channels_info))
+
+        except Exception as e:
+            self.logger.error(f"Error in list_channels: {e}")
+            await ctx.reply("チャンネル一覧の取得中にエラーが発生しました。")
 
     async def _get_recent_messages(self, channel, limit=10) -> List[str]:
         """Get recent messages from the channel"""
