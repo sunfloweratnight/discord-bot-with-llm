@@ -28,6 +28,7 @@ class Gemini(commands.Cog):
         self.initial_prompt = [
             {"role": "user", "parts": [initial_prompt]}
         ]
+        self.default_initial_prompt = initial_prompt  # デフォルトのプロンプトを保存
         self.BABY_ROOM_CATEGORY_ID = 1150088658947407952  # 赤ちゃん部屋のカテゴリーID
 
         genai.configure(api_key=api_key)
@@ -626,3 +627,73 @@ class Gemini(commands.Cog):
                 await ctx.reply(chunk)
         else:
             await ctx.reply(help_message)
+
+    @commands.command()
+    @commands.has_role("Parent")
+    async def show_prompt(self, ctx):
+        """現在のinitial promptを表示します"""
+        try:
+            current_prompt = self.initial_prompt[0]["parts"][0]
+            await ctx.reply(f"📝 **現在のinitial prompt**:\n```\n{current_prompt}\n```")
+        except Exception as e:
+            self.logger.error(f"Error in show_prompt: {e}")
+            await ctx.reply("initial promptの取得中にエラーが発生しました。")
+
+    @commands.command()
+    @commands.has_role("Parent")
+    async def set_prompt(self, ctx, *, new_prompt: str):
+        """initial promptを新しい内容に設定します"""
+        try:
+            self.initial_prompt = [{"role": "user", "parts": [new_prompt]}]
+            # 新しいプロンプトでチャットを初期化
+            self.chat = self.model.start_chat(history=self.initial_prompt)
+            await ctx.reply("✅ initial promptを更新し、チャットを初期化しました。\n"
+                          "新しいプロンプトの内容を確認するには `!show_prompt` を使用してください。")
+        except Exception as e:
+            self.logger.error(f"Error in set_prompt: {e}")
+            await ctx.reply("initial promptの更新中にエラーが発生しました。")
+
+    @commands.command()
+    @commands.has_role("Parent")
+    async def reset_prompt(self, ctx):
+        """initial promptをデフォルトの内容に戻します"""
+        try:
+            self.initial_prompt = [{"role": "user", "parts": [self.default_initial_prompt]}]
+            # デフォルトのプロンプトでチャットを初期化
+            self.chat = self.model.start_chat(history=self.initial_prompt)
+            await ctx.reply("✅ initial promptをデフォルトの内容に戻し、チャットを初期化しました。\n"
+                          "現在のプロンプトの内容を確認するには `!show_prompt` を使用してください。")
+        except Exception as e:
+            self.logger.error(f"Error in reset_prompt: {e}")
+            await ctx.reply("initial promptのリセット中にエラーが発生しました。")
+
+    async def _try_natural_language_command(self, text: str, ctx) -> bool:
+        """自然言語コマンドを処理する"""
+        # コマンドのマッピングを定義
+        command_patterns = {
+            # 既存のパターン...
+
+            # プロンプト関連のパターンを追加
+            ("プロンプト 表示", "プロンプト 確認", "設定 確認"): 
+                (self.show_prompt, "現在のプロンプトを表示します"),
+            ("プロンプト リセット", "設定 リセット", "デフォルト 戻す"): 
+                (self.reset_prompt, "プロンプトをデフォルトに戻します"),
+        }
+
+        # プロンプトの更新は特別な処理が必要なため、別途チェック
+        if any(pattern in text.lower() for pattern in ["プロンプト 変更", "プロンプト 設定", "設定 変更"]):
+            # "プロンプト変更"の後の文字列を抽出
+            import re
+            match = re.search(r'(?:プロンプト|設定)(?:変更|設定)[：:]\s*(.+)', text)
+            if match:
+                new_prompt = match.group(1).strip()
+                if new_prompt:
+                    try:
+                        await self.set_prompt(ctx, new_prompt=new_prompt)
+                        return True
+                    except Exception as e:
+                        self.logger.error(f"Error processing prompt update command: {e}")
+                        await ctx.reply("プロンプトの更新中にエラーが発生しました。")
+                        return True
+
+        # 既存のパターンマッチング処理...
