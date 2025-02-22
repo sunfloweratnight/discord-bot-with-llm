@@ -629,10 +629,15 @@ class Gemini(commands.Cog):
             await ctx.reply(help_message)
 
     @commands.command()
-    @commands.has_role("Parent")
     async def show_prompt(self, ctx):
         """現在のinitial promptを表示します"""
         try:
+            # DMでの実行を許可するが、サーバーでは権限チェックを行う
+            if ctx.guild is not None:  # サーバーでの実行
+                if not discord.utils.get(ctx.author.roles, name="Parent"):
+                    await ctx.reply("このコマンドを実行する権限がありません。")
+                    return
+
             current_prompt = self.initial_prompt[0]["parts"][0]
             await ctx.reply(f"📝 **現在のinitial prompt**:\n```\n{current_prompt}\n```")
         except Exception as e:
@@ -640,10 +645,15 @@ class Gemini(commands.Cog):
             await ctx.reply("initial promptの取得中にエラーが発生しました。")
 
     @commands.command()
-    @commands.has_role("Parent")
     async def set_prompt(self, ctx, *, new_prompt: str):
         """initial promptを新しい内容に設定します"""
         try:
+            # DMでの実行を許可するが、サーバーでは権限チェックを行う
+            if ctx.guild is not None:  # サーバーでの実行
+                if not discord.utils.get(ctx.author.roles, name="Parent"):
+                    await ctx.reply("このコマンドを実行する権限がありません。")
+                    return
+
             self.initial_prompt = [{"role": "user", "parts": [new_prompt]}]
             # 新しいプロンプトでチャットを初期化
             self.chat = self.model.start_chat(history=self.initial_prompt)
@@ -654,10 +664,15 @@ class Gemini(commands.Cog):
             await ctx.reply("initial promptの更新中にエラーが発生しました。")
 
     @commands.command()
-    @commands.has_role("Parent")
     async def reset_prompt(self, ctx):
         """initial promptをデフォルトの内容に戻します"""
         try:
+            # DMでの実行を許可するが、サーバーでは権限チェックを行う
+            if ctx.guild is not None:  # サーバーでの実行
+                if not discord.utils.get(ctx.author.roles, name="Parent"):
+                    await ctx.reply("このコマンドを実行する権限がありません。")
+                    return
+
             self.initial_prompt = [{"role": "user", "parts": [self.default_initial_prompt]}]
             # デフォルトのプロンプトでチャットを初期化
             self.chat = self.model.start_chat(history=self.initial_prompt)
@@ -669,10 +684,13 @@ class Gemini(commands.Cog):
 
     async def _try_natural_language_command(self, text: str, ctx) -> bool:
         """自然言語コマンドを処理する"""
+        # サーバーでの実行時のみ権限チェックを行う
+        is_parent = False
+        if ctx.guild is not None:
+            is_parent = discord.utils.get(ctx.author.roles, name="Parent") is not None
+
         # コマンドのマッピングを定義
         command_patterns = {
-            # 既存のパターン...
-
             # プロンプト関連のパターンを追加
             ("プロンプト 表示", "プロンプト 確認", "設定 確認"): 
                 (self.show_prompt, "現在のプロンプトを表示します"),
@@ -682,6 +700,11 @@ class Gemini(commands.Cog):
 
         # プロンプトの更新は特別な処理が必要なため、別途チェック
         if any(pattern in text.lower() for pattern in ["プロンプト 変更", "プロンプト 設定", "設定 変更"]):
+            # サーバーでの実行時は権限チェック
+            if ctx.guild is not None and not is_parent:
+                await ctx.reply("このコマンドを実行する権限がありません。")
+                return True
+
             # "プロンプト変更"の後の文字列を抽出
             import re
             match = re.search(r'(?:プロンプト|設定)(?:変更|設定)[：:]\s*(.+)', text)
