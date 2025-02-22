@@ -118,7 +118,11 @@ class RoleOperation(commands.Cog):
             return
 
         self.logger.info(f"Emoji {emoji_name} is reacted")
-        channel_reacted = self.guild.get_channel(payload.channel_id)
+        channel_reacted = self.guild.get_channel_or_thread(payload.channel_id)
+        if channel_reacted is None:
+            self.logger.warning(f"Channel/Thread {payload.channel_id} not found")
+            return
+            
         msg_reacted: Message = await channel_reacted.fetch_message(payload.message_id)
 
         reaction_count = 0
