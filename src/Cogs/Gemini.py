@@ -46,12 +46,13 @@ class Gemini(commands.Cog):
 
         self.chat = self.model.start_chat(history=self.initial_prompt)
         self.last_check_channel = None
-        # 定期チェックを開始
-        self.periodic_infant_check.start()
+        # 定期チェックはデフォルトでは開始しない
+        self.periodic_infant_check.stop()
 
     def cog_unload(self):
         """Cogがアンロードされるときにタスクを停止"""
-        self.periodic_infant_check.cancel()
+        if self.periodic_infant_check.is_running():
+            self.periodic_infant_check.cancel()
 
     @tasks.loop(minutes=30)  # 30分ごとに実行
     async def periodic_infant_check(self):
@@ -265,6 +266,28 @@ class Gemini(commands.Cog):
         
         self.periodic_infant_check.change_interval(minutes=minutes)
         await ctx.reply(f"定期チェックの間隔を{minutes}分に設定しました。")
+
+    @commands.command()
+    @commands.has_role("Parent")
+    async def stop_periodic_check(self, ctx):
+        """定期チェックを停止する"""
+        if not self.periodic_infant_check.is_running():
+            await ctx.reply("定期チェックは既に停止しています。")
+            return
+        
+        self.periodic_infant_check.cancel()
+        await ctx.reply("定期チェックを停止しました。")
+
+    @commands.command()
+    @commands.has_role("Parent")
+    async def start_periodic_check(self, ctx):
+        """定期チェックを開始する"""
+        if self.periodic_infant_check.is_running():
+            await ctx.reply("定期チェックは既に実行中です。")
+            return
+        
+        self.periodic_infant_check.start()
+        await ctx.reply("定期チェックを開始しました。")
 
     @commands.command()
     @commands.has_role("Parent")
@@ -545,3 +568,61 @@ class Gemini(commands.Cog):
         infant_members = [member for member in guild.members 
                          if infant_role in member.roles and not member.bot]
         return random.choice(infant_members) if infant_members else None
+
+    @commands.command()
+    async def help_command(self, ctx):
+        """利用可能なコマンドの一覧を表示します"""
+        # コマンドの説明を辞書で定義
+        commands_help = {
+            "gem": "AIと会話します",
+            "save_message": "メッセージをデータベースに保存します",
+            "get_messages": "保存されたメッセージを表示します",
+            "set_history_limit": "チャット履歴の制限を設定します (1-50の間)",
+            "set_check_interval": "定期チェックの間隔を設定します (10-1440分の間)",
+            "stop_periodic_check": "定期チェックを停止します",
+            "start_periodic_check": "定期チェックを開始します",
+            "check_status": "定期チェックの状態を確認します",
+            "list_channels": "チャンネル一覧と権限同期状態を表示します",
+            "list_categories": "カテゴリー一覧を表示します",
+            "sync_all_permissions": "すべてのチャンネルの権限を同期します",
+            "sync_permissions": "指定したチャンネルまたはカテゴリーの権限を同期します",
+            "check_infant": "ランダムなInfantメンバーに声をかけます",
+            "discuss_topic": "最近の話題についてInfantメンバーに意見を聞きます",
+            "help_command": "このヘルプメッセージを表示します"
+        }
+
+        # ユーザーの権限に基づいてコマンドをフィルタリング
+        available_commands = []
+        is_parent = discord.utils.get(ctx.author.roles, name="Parent") is not None
+        is_toddler = discord.utils.get(ctx.author.roles, name="Toddler") is not None
+
+        for cmd_name, cmd_desc in commands_help.items():
+            # Parent専用コマンド
+            if cmd_name in ["set_check_interval", "stop_periodic_check", "start_periodic_check", 
+                          "check_status", "list_channels", "list_categories", "sync_all_permissions", 
+                          "sync_permissions", "check_infant", "discuss_topic"]:
+                if is_parent:
+                    available_commands.append((cmd_name, cmd_desc))
+            # Parent/Toddler共用コマンド
+            elif cmd_name in ["gem", "save_message", "get_messages", "set_history_limit"]:
+                if is_parent or is_toddler:
+                    available_commands.append((cmd_name, cmd_desc))
+            # 誰でも使えるコマンド
+            else:
+                available_commands.append((cmd_name, cmd_desc))
+
+        # ヘルプメッセージを構築
+        help_lines = ["📋 **利用可能なコマンド一覧**\n"]
+        help_lines.append("各コマンドは `!` プレフィックスを付けて使用します。\n")
+        
+        for cmd_name, cmd_desc in available_commands:
+            help_lines.append(f"**!{cmd_name}**\n└ {cmd_desc}\n")
+
+        # メッセージが2000文字を超える場合は分割して送信
+        help_message = "\n".join(help_lines)
+        if len(help_message) > 1990:
+            chunks = [help_message[i:i+1990] for i in range(0, len(help_message), 1990)]
+            for chunk in chunks:
+                await ctx.reply(chunk)
+        else:
+            await ctx.reply(help_message)
