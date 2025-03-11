@@ -851,6 +851,69 @@ class Gemini(commands.Cog):
                 
                 deleted_count = 0
                 error_channels = []
+                rate_limited_count = 0
+                
+                # レート制限対応のための削除関数
+                async def delete_with_rate_limit(channel, messages):
+                    nonlocal deleted_count, rate_limited_count
+                    
+                    if not messages:
+                        return
+                        
+                    # 一括削除（14日以内のメッセージのみ）
+                    two_weeks_ago = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=14)
+                    recent_messages = [m for m in messages if m.created_at > two_weeks_ago]
+                    old_messages = [m for m in messages if m.created_at <= two_weeks_ago]
+                    
+                    # 最近のメッセージは一括削除
+                    if recent_messages:
+                        try:
+                            await channel.delete_messages(recent_messages)
+                            deleted_count += len(recent_messages)
+                            # 一括削除後の待機（レート制限対策）
+                            await asyncio.sleep(1.5)
+                        except discord.errors.HTTPException as e:
+                            if e.code == 429:  # レート制限
+                                rate_limited_count += 1
+                                retry_after = e.retry_after if hasattr(e, 'retry_after') else 2
+                                await status_msg.edit(content=f"⏳ レート制限に達しました。{retry_after:.1f}秒待機中... (削除済み: {deleted_count}件)")
+                                await asyncio.sleep(retry_after + 0.5)  # 余裕を持って待機
+                                # 個別に削除を試みる
+                                for msg in recent_messages:
+                                    await delete_single_message(channel, msg)
+                            else:
+                                self.logger.error(f"Error bulk deleting messages: {e}")
+                    
+                    # 古いメッセージは個別に削除
+                    for msg in old_messages:
+                        await delete_single_message(channel, msg)
+                
+                # 個別メッセージ削除関数
+                async def delete_single_message(channel, message):
+                    nonlocal deleted_count, rate_limited_count
+                    
+                    try:
+                        await message.delete()
+                        deleted_count += 1
+                        # 個別削除後の待機（レート制限対策）
+                        await asyncio.sleep(0.8)
+                    except discord.errors.HTTPException as e:
+                        if e.code == 429:  # レート制限
+                            rate_limited_count += 1
+                            retry_after = e.retry_after if hasattr(e, 'retry_after') else 1
+                            # 指数バックオフ（リトライ回数に応じて待機時間を増加）
+                            backoff = min(retry_after * (1.5 ** min(rate_limited_count, 5)), 10)
+                            await status_msg.edit(content=f"⏳ レート制限に達しました。{backoff:.1f}秒待機中... (削除済み: {deleted_count}件)")
+                            await asyncio.sleep(backoff)
+                            # 再試行
+                            try:
+                                await message.delete()
+                                deleted_count += 1
+                                await asyncio.sleep(1.0)  # 成功後は長めに待機
+                            except Exception:
+                                pass  # 再試行失敗は無視
+                        elif e.code != 404:  # 404はメッセージが既に削除されている場合
+                            self.logger.error(f"Error deleting message: {e}")
                 
                 if is_server_wide:
                     # サーバー全体の処理
@@ -865,158 +928,57 @@ class Gemini(commands.Cog):
                                 error_channels.append(f"{channel.name} (権限不足)")
                                 continue
                                 
-                            # 進捗状況を更新（レート制限を避けるため更新頻度を下げる）
+                            # 進捗状況を更新
                             processed_channels += 1
-                            if processed_channels % 5 == 0 or processed_channels == total_channels:
-                                progress = int((processed_channels / total_channels) * 100)
-                                await progress_msg.edit(content=f"{progress}% 完了 - {channel.name}を処理中...")
+                            progress = int((processed_channels / total_channels) * 100)
+                            await progress_msg.edit(content=f"{progress}% 完了 - {channel.name}を処理中... (削除済み: {deleted_count}件)")
                             
-                            # メッセージ削除
-                            try:
-                                # 一度に取得するメッセージ数を制限して複数回に分ける
-                                batch_size = 100
-                                total_deleted = 0
-                                
-                                for i in range(0, limit, batch_size):
-                                    current_limit = min(batch_size, limit - total_deleted)
-                                    if current_limit <= 0:
-                                        break
-                                        
-                                    # メッセージを取得して手動でフィルタリング
-                                    messages = []
-                                    async for msg in channel.history(limit=200):  # 多めに取得
-                                        if len(messages) >= current_limit:
-                                            break
-                                        if msg.author.id == user.id:
-                                            messages.append(msg)
+                            # メッセージ取得
+                            messages_to_delete = []
+                            async for msg in channel.history(limit=limit):
+                                if is_user(msg):
+                                    messages_to_delete.append(msg)
                                     
-                                    if messages:
-                                        # 14日以上前のメッセージは一括削除できないので個別に削除
-                                        now = datetime.datetime.now(datetime.timezone.utc)  # タイムゾーン付きで現在時刻を取得
-                                        old_messages = []
-                                        new_messages = []
-                                        
-                                        for msg in messages:
-                                            # メッセージの作成時刻をUTC with timezoneに統一
-                                            msg_time = msg.created_at
-                                            if msg_time.tzinfo is None:
-                                                msg_time = msg_time.replace(tzinfo=datetime.timezone.utc)
-                                                
-                                            # 14日以上前かどうかを判定
-                                            if (now - msg_time).days >= 14:
-                                                old_messages.append(msg)
-                                            else:
-                                                new_messages.append(msg)
-                                        
-                                        # 新しいメッセージは一括削除
-                                        if new_messages:
-                                            await channel.delete_messages(new_messages)
-                                            
-                                        # 古いメッセージは個別に削除
-                                        for msg in old_messages:
-                                            try:
-                                                await msg.delete()
-                                                # レート制限を避けるため少し待機
-                                                await asyncio.sleep(0.5)
-                                            except Exception as e:
-                                                self.logger.error(f"Error deleting old message: {e}")
-                                        
-                                        total_deleted += len(messages)
-                                        deleted_count += len(messages)
-                                    
-                                    # バッチ間で待機
-                                    await asyncio.sleep(1)
-                                    
-                                    if total_deleted >= limit:
-                                        break
-                            except discord.Forbidden:
-                                error_channels.append(f"{channel.name} (権限不足)")
-                            except discord.HTTPException as e:
-                                self.logger.error(f"HTTP error in {channel.name}: {e}")
-                                error_channels.append(f"{channel.name} (HTTPエラー)")
-                            except Exception as e:
-                                self.logger.error(f"Error deleting messages in {channel.name}: {e}")
-                                error_channels.append(f"{channel.name} (エラー: {str(e)})")
+                                    # バッチサイズに達したら削除実行
+                                    if len(messages_to_delete) >= 20:
+                                        await delete_with_rate_limit(channel, messages_to_delete)
+                                        messages_to_delete = []
+                                        # 進捗更新
+                                        await progress_msg.edit(content=f"{progress}% 完了 - {channel.name}を処理中... (削除済み: {deleted_count}件)")
                             
-                            # APIレート制限を考慮して少し待機
-                            await asyncio.sleep(1)
+                            # 残りのメッセージを削除
+                            if messages_to_delete:
+                                await delete_with_rate_limit(channel, messages_to_delete)
                             
                         except discord.Forbidden:
                             error_channels.append(f"{channel.name} (権限不足)")
                         except Exception as e:
-                            self.logger.error(f"Error accessing channel {channel.name}: {e}")
+                            self.logger.error(f"Error purging messages in {channel.name}: {e}")
                             error_channels.append(f"{channel.name} (エラー: {str(e)})")
                     
                     # 進捗メッセージを削除
-                    try:
-                        await progress_msg.delete()
-                    except:
-                        pass
+                    await progress_msg.delete()
                 else:
                     # 単一チャンネルの処理
                     try:
-                        # 一度に取得するメッセージ数を制限して複数回に分ける
-                        batch_size = 100
-                        total_deleted = 0
+                        messages_to_delete = []
+                        async for msg in ctx.channel.history(limit=limit):
+                            if is_user(msg):
+                                messages_to_delete.append(msg)
+                                
+                                # バッチサイズに達したら削除実行
+                                if len(messages_to_delete) >= 20:
+                                    await delete_with_rate_limit(ctx.channel, messages_to_delete)
+                                    messages_to_delete = []
+                                    # 進捗更新
+                                    await status_msg.edit(content=f"🔍 {user.display_name}のメッセージを削除中... (削除済み: {deleted_count}件)")
                         
-                        for i in range(0, limit, batch_size):
-                            current_limit = min(batch_size, limit - total_deleted)
-                            if current_limit <= 0:
-                                break
-                                
-                            # メッセージを取得して手動でフィルタリング
-                            messages = []
-                            async for msg in ctx.channel.history(limit=200):  # 多めに取得
-                                if len(messages) >= current_limit:
-                                    break
-                                if msg.author.id == user.id:
-                                    messages.append(msg)
+                        # 残りのメッセージを削除
+                        if messages_to_delete:
+                            await delete_with_rate_limit(ctx.channel, messages_to_delete)
                             
-                            if messages:
-                                # 14日以上前のメッセージは一括削除できないので個別に削除
-                                now = datetime.datetime.now(datetime.timezone.utc)  # タイムゾーン付きで現在時刻を取得
-                                old_messages = []
-                                new_messages = []
-                                
-                                for msg in messages:
-                                    # メッセージの作成時刻をUTC with timezoneに統一
-                                    msg_time = msg.created_at
-                                    if msg_time.tzinfo is None:
-                                        msg_time = msg_time.replace(tzinfo=datetime.timezone.utc)
-                                        
-                                    # 14日以上前かどうかを判定
-                                    if (now - msg_time).days >= 14:
-                                        old_messages.append(msg)
-                                    else:
-                                        new_messages.append(msg)
-                                
-                                # 新しいメッセージは一括削除
-                                if new_messages:
-                                    await ctx.channel.delete_messages(new_messages)
-                                    
-                                # 古いメッセージは個別に削除
-                                for msg in old_messages:
-                                    try:
-                                        await msg.delete()
-                                        # レート制限を避けるため少し待機
-                                        await asyncio.sleep(0.5)
-                                    except Exception as e:
-                                        self.logger.error(f"Error deleting old message: {e}")
-                                
-                                total_deleted += len(messages)
-                                deleted_count += len(messages)
-                            
-                            # バッチ間で待機
-                            await asyncio.sleep(1)
-                            
-                            if total_deleted >= limit:
-                                break
                     except discord.Forbidden:
                         await status_msg.edit(content="❌ メッセージを削除する権限がありません。")
-                        return
-                    except discord.HTTPException as e:
-                        self.logger.error(f"HTTP error: {e}")
-                        await status_msg.edit(content=f"❌ HTTPエラーが発生しました: {str(e)}")
                         return
                     except Exception as e:
                         self.logger.error(f"Error purging messages: {e}")
@@ -1025,6 +987,8 @@ class Gemini(commands.Cog):
                 
                 # 結果報告
                 result_msg = f"✅ {user.display_name}のメッセージを{deleted_count}件削除しました。"
+                if rate_limited_count > 0:
+                    result_msg += f"\n⚠️ 処理中に{rate_limited_count}回のレート制限が発生しました。"
                 if error_channels:
                     result_msg += f"\n⚠️ 以下のチャンネルでエラーが発生しました：\n" + "\n".join(error_channels[:10])
                     if len(error_channels) > 10:
