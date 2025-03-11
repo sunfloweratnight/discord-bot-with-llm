@@ -7,6 +7,7 @@ from discord.ext import tasks
 import random
 import datetime
 from typing import List, Optional
+import re
 
 from src import Entities, Session
 from src.Cogs.Utils import sanitize_args
@@ -655,10 +656,6 @@ class Gemini(commands.Cog):
                     return
 
             self.initial_prompt = [{"role": "user", "parts": [new_prompt]}]
-            # 新しいプロンプトでチャットを初期化
-            self.chat = self.model.start_chat(history=self.initial_prompt)
-            await ctx.reply("✅ initial promptを更新し、チャットを初期化しました。\n"
-                          "新しいプロンプトの内容を確認するには `!show_prompt` を使用してください。")
         except Exception as e:
             self.logger.error(f"Error in set_prompt: {e}")
             await ctx.reply("initial promptの更新中にエラーが発生しました。")
@@ -719,4 +716,180 @@ class Gemini(commands.Cog):
                         await ctx.reply("プロンプトの更新中にエラーが発生しました。")
                         return True
 
-        # 既存のパターンマッチング処理...
+        # ユーザーメッセージ削除用のパターン
+        purge_patterns = [
+            # 通常の削除パターン（チャンネル内）
+            r"(.*)(?:の|)メッセージ(?:を|)(.*)[0-9]+件(?:|削除|消去|クリア)(?:して|)",
+            r"(.*)(?:の|)メッセージ(?:を|)(?:|削除|消去|クリア)(?:して|)",
+            r"(.*)(?:の|発言|コメント)(?:を|全部|すべて)(?:|削除|消去|クリア)(?:して|)",
+            
+            # サーバー全体からの削除パターン
+            r"(.*)(?:の|)メッセージ(?:を|)(?:サーバー全体|サーバー内|すべての?チャンネル)(?:から|で|)(.*)[0-9]+件(?:|削除|消去|クリア)(?:して|)",
+            r"(.*)(?:の|)メッセージ(?:を|)(?:サーバー全体|サーバー内|すべての?チャンネル)(?:から|で|)(?:|削除|消去|クリア)(?:して|)",
+            r"(.*)(?:の|発言|コメント)(?:を|)(?:サーバー全体|サーバー内|すべての?チャンネル)(?:から|で|全部|すべて)(?:|削除|消去|クリア)(?:して|)",
+        ]
+        
+        for pattern in purge_patterns:
+            match = re.search(pattern, text)
+            if match:
+                # ユーザー名を抽出
+                user_name = match.group(1).strip()
+                if not user_name:
+                    continue
+                    
+                # 権限チェック
+                if hasattr(ctx, 'guild') and ctx.guild:
+                    if not any(role.name == "Parent" for role in ctx.author.roles):
+                        await ctx.reply("この操作にはParent権限が必要です。")
+                        return True
+                
+                # ユーザーを検索
+                found_member = None
+                for member in ctx.guild.members:
+                    if (user_name.lower() in member.display_name.lower() or 
+                        user_name.lower() in member.name.lower() or 
+                        (member.nick and user_name.lower() in member.nick.lower())):
+                        found_member = member
+                        break
+                
+                if found_member:
+                    # 数値を抽出
+                    num_match = re.search(r'([0-9]+)件', text)
+                    limit = int(num_match.group(1)) if num_match else 100
+                    
+                    # サーバー全体かどうかを判断
+                    server_wide = any(keyword in text for keyword in ["サーバー全体", "サーバー内", "すべてのチャンネル", "全チャンネル"])
+                    
+                    # コマンド実行
+                    if server_wide:
+                        ctx.command = self.bot.get_command('purge_user_server')
+                        await self.purge_user_server(ctx, found_member, limit)
+                    else:
+                        ctx.command = self.bot.get_command('purge_user')
+                        await self.purge_user(ctx, found_member, limit)
+                    return True
+        
+        # 既存のreturn False
+        return False
+
+    @commands.command()
+    @commands.has_role("Parent")
+    @commands.guild_only()
+    async def purge_user(self, ctx, user: discord.Member, limit: int = 100, *, server_wide: bool = False):
+        """指定したユーザーのメッセージを一括削除します
+        
+        引数:
+        user: 削除対象のユーザー
+        limit: 削除するメッセージの最大件数 (デフォルト: 100)
+        server_wide: サーバー全体から検索して削除するかどうか (デフォルト: False)
+        """
+        if limit <= 0 or limit > 1000:
+            await ctx.send("削除するメッセージ数は1から1000の間で指定してください。")
+            return
+            
+        # 警告メッセージの準備
+        target_scope = "サーバー全体" if server_wide else "このチャンネル"
+        warning_text = f"⚠️ **{target_scope}**から**{user.display_name}**のメッセージを最大{limit}件削除しますか？\n"
+        
+        if server_wide:
+            warning_text += "**⚠️ 警告: この操作はサーバー内のすべてのチャンネルに影響します！⚠️**\n"
+            warning_text += "処理には時間がかかる場合があります。\n"
+        
+        warning_text += f"確認するには✅リアクションを、キャンセルするには❌リアクションを付けてください。\n"
+        warning_text += f"30秒後にタイムアウトします。"
+        
+        # 確認メッセージを送信
+        confirm_msg = await ctx.send(warning_text)
+        
+        await confirm_msg.add_reaction("✅")
+        await confirm_msg.add_reaction("❌")
+        
+        def check(reaction, reactor):
+            return (reactor == ctx.author and 
+                   str(reaction.emoji) in ["✅", "❌"] and 
+                   reaction.message.id == confirm_msg.id)
+        
+        try:
+            reaction, reactor = await self.bot.wait_for('reaction_add', timeout=30.0, check=check)
+            
+            if str(reaction.emoji) == "✅":
+                status_msg = await ctx.send(f"🔍 {user.display_name}のメッセージを検索中...")
+                
+                def is_user(m):
+                    return m.author == user
+                
+                deleted_count = 0
+                error_channels = []
+                
+                if server_wide:
+                    # サーバー全体の処理
+                    progress_msg = await ctx.send("0% 完了")
+                    total_channels = len(ctx.guild.text_channels)
+                    processed_channels = 0
+                    
+                    for channel in ctx.guild.text_channels:
+                        try:
+                            # チャンネルにアクセスできるか確認
+                            if not channel.permissions_for(ctx.guild.me).manage_messages:
+                                error_channels.append(f"{channel.name} (権限不足)")
+                                continue
+                                
+                            # 進捗状況を更新
+                            processed_channels += 1
+                            progress = int((processed_channels / total_channels) * 100)
+                            await progress_msg.edit(content=f"{progress}% 完了 - {channel.name}を処理中...")
+                            
+                            # メッセージ削除
+                            deleted = await channel.purge(limit=limit, check=is_user)
+                            deleted_count += len(deleted)
+                            
+                            # APIレート制限を考慮して少し待機
+                            await asyncio.sleep(0.5)
+                            
+                        except discord.Forbidden:
+                            error_channels.append(f"{channel.name} (権限不足)")
+                        except Exception as e:
+                            self.logger.error(f"Error purging messages in {channel.name}: {e}")
+                            error_channels.append(f"{channel.name} (エラー: {str(e)})")
+                    
+                    # 進捗メッセージを削除
+                    await progress_msg.delete()
+                else:
+                    # 単一チャンネルの処理
+                    try:
+                        deleted = await ctx.channel.purge(limit=limit, check=is_user)
+                        deleted_count = len(deleted)
+                    except discord.Forbidden:
+                        await status_msg.edit(content="❌ メッセージを削除する権限がありません。")
+                        return
+                    except Exception as e:
+                        self.logger.error(f"Error purging messages: {e}")
+                        await status_msg.edit(content=f"❌ エラーが発生しました: {str(e)}")
+                        return
+                
+                # 結果報告
+                result_msg = f"✅ {user.display_name}のメッセージを{deleted_count}件削除しました。"
+                if error_channels:
+                    result_msg += f"\n⚠️ 以下のチャンネルでエラーが発生しました：\n" + "\n".join(error_channels[:10])
+                    if len(error_channels) > 10:
+                        result_msg += f"\n...他{len(error_channels) - 10}チャンネル"
+                
+                await status_msg.edit(content=result_msg)
+            else:
+                await ctx.send("操作をキャンセルしました。")
+                
+        except asyncio.TimeoutError:
+            await ctx.send("タイムアウトしました。操作をキャンセルします。")
+        
+        # 確認メッセージを削除
+        try:
+            await confirm_msg.delete()
+        except:
+            pass
+
+    @commands.command()
+    @commands.has_role("Parent")
+    @commands.guild_only()
+    async def purge_user_server(self, ctx, user: discord.Member, limit: int = 100):
+        """サーバー全体から指定したユーザーのメッセージを一括削除します"""
+        await self.purge_user(ctx, user, limit, server_wide=True)
