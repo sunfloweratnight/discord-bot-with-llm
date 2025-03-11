@@ -189,14 +189,8 @@ class Gemini(commands.Cog):
         await ctx.reply(f'メッセージ履歴の制限を{limit}件に設定しました。')
 
     async def process_message(self, arguments, reply_func, author_name):
-        if not arguments:
+        if not arguments and not hasattr(reply_func, 'message'):
             await reply_func.reply('どしたん?話きこか?')
-            return
-
-        if arguments.lower() == 'reset':
-            self.logger.info(f"{author_name} is resetting the chat")
-            self.chat = self.model.start_chat(history=self.initial_prompt)
-            await reply_func.reply('チャットの履歴をリセットしたお')
             return
 
         # Fetch messages from the channel using the configurable limit
@@ -212,18 +206,41 @@ class Gemini(commands.Cog):
         # Create context with previous messages
         context = "Previous messages:\n" + "\n".join(messages) + "\n\nCurrent message:\n"
         
-        self.logger.info(f"{author_name} is sending message: {arguments}")
-        response = await self.send_chat_message(f"{context}{author_name}: {arguments}")
-        self.logger.info(f"Gemini response: {response}")
-        
-        response_text = response.text if hasattr(response, 'text') else str(response)
-        if len(response_text) > 2000:  # Discord message length limit
+        try:
+            response = await self.send_chat_message(f"{context}{author_name}: {arguments}")
+            response_text = response.text if hasattr(response, 'text') else str(response)
+            
             # Split long messages
-            chunks = [response_text[i:i+1990] for i in range(0, len(response_text), 1990)]
-            for chunk in chunks:
-                await reply_func.reply(chunk)
-        else:
-            await reply_func.reply(response_text)
+            if len(response_text) > 2000:
+                chunks = [response_text[i:i+1990] for i in range(0, len(response_text), 1990)]
+                for chunk in chunks:
+                    try:
+                        await reply_func.reply(chunk)
+                    except discord.errors.HTTPException as e:
+                        # メッセージが見つからない場合は通常のメッセージとして送信
+                        if e.code == 50035 and "Unknown message" in str(e):
+                            await channel.send(f"**{author_name}へ返信:** {chunk}")
+                        else:
+                            # その他のHTTPエラーは再スロー
+                            raise
+            else:
+                try:
+                    await reply_func.reply(response_text)
+                except discord.errors.HTTPException as e:
+                    # メッセージが見つからない場合は通常のメッセージとして送信
+                    if e.code == 50035 and "Unknown message" in str(e):
+                        await channel.send(f"**{author_name}へ返信:** {response_text}")
+                    else:
+                        # その他のHTTPエラーは再スロー
+                        raise
+                        
+        except Exception as e:
+            self.logger.error(f"Error in process_message: {e}")
+            try:
+                await reply_func.reply("申し訳ありません。メッセージの処理中にエラーが発生しました。")
+            except discord.errors.HTTPException:
+                # 返信できない場合は通常のメッセージとして送信
+                await channel.send("申し訳ありません。メッセージの処理中にエラーが発生しました。")
 
     async def send_chat_message(self, msg):
         """Asynchronously send a message to the chat with retry logic"""
@@ -774,13 +791,13 @@ class Gemini(commands.Cog):
 
     @commands.command()
     @commands.has_role("Parent")
-    async def purge_user(self, ctx, user: discord.Member = None, limit: int = 100, *, server_wide: bool = False):
-        """指定したユーザーまたはBotのメッセージを一括削除します
+    async def purge_user(self, ctx, user: discord.Member = None, limit: int = 100, *, server_wide: str = None):
+        """指定したユーザーのメッセージを一括削除します
         
         引数:
-        user: 削除対象のユーザーまたはBot
+        user: 削除対象のユーザー
         limit: 削除するメッセージの最大件数 (デフォルト: 100)
-        server_wide: サーバー全体から検索して削除するかどうか (デフォルト: False)
+        server_wide: サーバー全体から検索して削除するかどうか ("yes"または"true"で有効化)
         """
         # DMでの使用を検出してエラーメッセージを表示
         if not ctx.guild:
@@ -788,52 +805,54 @@ class Gemini(commands.Cog):
             return
             
         if user is None:
-            await ctx.send("❌ 削除対象のユーザーまたはBotを指定してください。\n使用例: `!purge_user @ユーザー名 100`")
+            await ctx.send("❌ 削除対象のユーザーを指定してください。\n使用例: `!purge_user @ユーザー名 100`")
             return
             
         if limit <= 0 or limit > 1000:
             await ctx.send("削除するメッセージ数は1から1000の間で指定してください。")
             return
             
+        # server_wideパラメータの処理
+        is_server_wide = False
+        if server_wide is not None:
+            server_wide = server_wide.lower()
+            is_server_wide = server_wide in ["yes", "y", "true", "t", "1", "on", "enable", "server", "all"]
+            
         # 警告メッセージの準備
-        target_scope = "サーバー全体" if server_wide else "このチャンネル"
-        user_type = "Bot" if user.bot else "ユーザー"
-        warning_text = f"⚠️ **{target_scope}**から**{user.display_name}**({user_type})のメッセージを最大{limit}件削除しますか？\n"
+        target_scope = "サーバー全体" if is_server_wide else "このチャンネル"
+        warning_text = f"⚠️ **{target_scope}**から**{user.display_name}**のメッセージを最大{limit}件削除しますか？\n"
         
-        if server_wide:
+        if is_server_wide:
             warning_text += "**⚠️ 警告: この操作はサーバー内のすべてのチャンネルに影響します！⚠️**\n"
             warning_text += "処理には時間がかかる場合があります。\n"
         
-        warning_text += f"確認するには「yes」、キャンセルするには「no」と返信してください。\n"
+        warning_text += f"確認するには✅リアクションを、キャンセルするには❌リアクションを付けてください。\n"
         warning_text += f"30秒後にタイムアウトします。"
         
         # 確認メッセージを送信
         confirm_msg = await ctx.send(warning_text)
         
-        # リアクションの代わりにテキスト応答を待つ
-        def check_reply(m):
-            return m.author == ctx.author and m.channel == ctx.channel and m.content.lower() in ["yes", "no", "はい", "いいえ"]
+        await confirm_msg.add_reaction("✅")
+        await confirm_msg.add_reaction("❌")
+        
+        def check(reaction, reactor):
+            return (reactor == ctx.author and 
+                   str(reaction.emoji) in ["✅", "❌"] and 
+                   reaction.message.id == confirm_msg.id)
         
         try:
-            reply = await self.bot.wait_for('message', timeout=30.0, check=check_reply)
+            reaction, reactor = await self.bot.wait_for('reaction_add', timeout=30.0, check=check)
             
-            # 確認応答を削除（オプション）
-            try:
-                await reply.delete()
-            except:
-                pass
-                
-            if reply.content.lower() in ["yes", "はい"]:
-                user_type_str = "Bot" if user.bot else "ユーザー"
-                status_msg = await ctx.send(f"🔍 {user.display_name}({user_type_str})のメッセージを検索中...")
+            if str(reaction.emoji) == "✅":
+                status_msg = await ctx.send(f"🔍 {user.display_name}のメッセージを検索中...")
                 
                 def is_user(m):
-                    return m.author.id == user.id  # IDで比較するように変更
+                    return m.author == user
                 
                 deleted_count = 0
                 error_channels = []
                 
-                if server_wide:
+                if is_server_wide:
                     # サーバー全体の処理
                     progress_msg = await ctx.send("0% 完了")
                     total_channels = len(ctx.guild.text_channels)
@@ -1005,8 +1024,7 @@ class Gemini(commands.Cog):
                         return
                 
                 # 結果報告
-                user_type_str = "Bot" if user.bot else "ユーザー"
-                result_msg = f"✅ {user.display_name}({user_type_str})のメッセージを{deleted_count}件削除しました。"
+                result_msg = f"✅ {user.display_name}のメッセージを{deleted_count}件削除しました。"
                 if error_channels:
                     result_msg += f"\n⚠️ 以下のチャンネルでエラーが発生しました：\n" + "\n".join(error_channels[:10])
                     if len(error_channels) > 10:
@@ -1038,4 +1056,4 @@ class Gemini(commands.Cog):
             await ctx.send("❌ 削除対象のユーザーを指定してください。\n使用例: `!purge_user_server @ユーザー名 100`")
             return
             
-        await self.purge_user(ctx, user, limit, server_wide=True)
+        await self.purge_user(ctx, user, limit, server_wide="yes")
