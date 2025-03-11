@@ -732,20 +732,16 @@ class Gemini(commands.Cog):
         for pattern in purge_patterns:
             match = re.search(pattern, text)
             if match:
-                # DMでの実行はエラーメッセージを表示
-                if not hasattr(ctx, 'guild') or ctx.guild is None:
-                    await ctx.reply("このコマンドはサーバー内でのみ使用できます。DMでは利用できません。")
-                    return True
-                
                 # ユーザー名を抽出
                 user_name = match.group(1).strip()
                 if not user_name:
                     continue
                     
                 # 権限チェック
-                if not any(role.name == "Parent" for role in ctx.author.roles):
-                    await ctx.reply("この操作にはParent権限が必要です。")
-                    return True
+                if hasattr(ctx, 'guild') and ctx.guild:
+                    if not any(role.name == "Parent" for role in ctx.author.roles):
+                        await ctx.reply("この操作にはParent権限が必要です。")
+                        return True
                 
                 # ユーザーを検索
                 found_member = None
@@ -778,8 +774,7 @@ class Gemini(commands.Cog):
 
     @commands.command()
     @commands.has_role("Parent")
-    @commands.guild_only()
-    async def purge_user(self, ctx, user: discord.Member, limit: int = 100, *, server_wide: bool = False):
+    async def purge_user(self, ctx, user: discord.Member = None, limit: int = 100, *, server_wide: bool = False):
         """指定したユーザーのメッセージを一括削除します
         
         引数:
@@ -787,9 +782,13 @@ class Gemini(commands.Cog):
         limit: 削除するメッセージの最大件数 (デフォルト: 100)
         server_wide: サーバー全体から検索して削除するかどうか (デフォルト: False)
         """
-        # サーバー内でのみ実行可能
+        # DMでの使用を検出してエラーメッセージを表示
         if not ctx.guild:
-            await ctx.send("このコマンドはサーバー内でのみ使用できます。DMでは利用できません。")
+            await ctx.send("❌ このコマンドはサーバー内でのみ使用できます。DMでは使用できません。")
+            return
+            
+        if user is None:
+            await ctx.send("❌ 削除対象のユーザーを指定してください。\n使用例: `!purge_user @ユーザー名 100`")
             return
             
         if limit <= 0 or limit > 1000:
@@ -898,11 +897,15 @@ class Gemini(commands.Cog):
 
     @commands.command()
     @commands.has_role("Parent")
-    async def purge_user_server(self, ctx, user: discord.Member, limit: int = 100):
+    async def purge_user_server(self, ctx, user: discord.Member = None, limit: int = 100):
         """サーバー全体から指定したユーザーのメッセージを一括削除します"""
-        # サーバー内でのみ実行可能
+        # DMでの使用を検出してエラーメッセージを表示
         if not ctx.guild:
-            await ctx.send("このコマンドはサーバー内でのみ使用できます。DMでは利用できません。")
+            await ctx.send("❌ このコマンドはサーバー内でのみ使用できます。DMでは使用できません。")
+            return
+            
+        if user is None:
+            await ctx.send("❌ 削除対象のユーザーを指定してください。\n使用例: `!purge_user_server @ユーザー名 100`")
             return
             
         await self.purge_user(ctx, user, limit, server_wide=True)

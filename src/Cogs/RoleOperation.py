@@ -92,15 +92,15 @@ class RoleOperation(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message):
-        # DMの場合は処理をスキップ
-        if not message.guild:
-            return
-
         author, content = message.author, message.content
         sanitized_content = re.sub("<@\d+>", "", content).strip()
         
-        # authorがMemberオブジェクトであることを確認（DMの場合はUserオブジェクト）
-        member_roles = [role.name for role in author.roles] if hasattr(author, 'roles') else []
+        # DMの場合は処理をスキップ（Guild内のメッセージのみ処理）
+        if not message.guild:
+            return
+            
+        # メッセージがサーバー内の場合のみroles属性にアクセス
+        member_roles = [role.name for role in author.roles]
         public_channels_ids = [channel.id for channel in self.public_channels]
 
         is_message_empty = len(sanitized_content) == 0
