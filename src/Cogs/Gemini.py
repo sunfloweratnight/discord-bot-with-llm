@@ -779,8 +779,8 @@ class Gemini(commands.Cog):
                     
                     # コマンド実行
                     if server_wide:
-                        ctx.command = self.bot.get_command('purge_user_server')
-                        await self.purge_user_server(ctx, found_member, limit)
+                        ctx.command = self.bot.get_command('purge_user')
+                        await self.purge_user(ctx, found_member, limit)
                     else:
                         ctx.command = self.bot.get_command('purge_user')
                         await self.purge_user(ctx, found_member, limit)
@@ -791,13 +791,12 @@ class Gemini(commands.Cog):
 
     @commands.command()
     @commands.has_role("Parent")
-    async def purge_user(self, ctx, user: discord.Member = None, limit: int = 100, *, server_wide: str = None):
-        """指定したユーザーのメッセージを一括削除します
+    async def purge_user(self, ctx, user: discord.Member = None, limit: int = 0):
+        """指定したユーザーのメッセージをサーバー全体から完全に削除します
         
         引数:
         user: 削除対象のユーザー
-        limit: 削除するメッセージの最大件数 (デフォルト: 100)
-        server_wide: サーバー全体から検索して削除するかどうか ("yes"または"true"で有効化)
+        limit: 削除するメッセージの最大件数 (0=制限なし、デフォルト: 制限なし)
         """
         # DMでの使用を検出してエラーメッセージを表示
         if not ctx.guild:
@@ -805,27 +804,20 @@ class Gemini(commands.Cog):
             return
             
         if user is None:
-            await ctx.send("❌ 削除対象のユーザーを指定してください。\n使用例: `!purge_user @ユーザー名 100`")
+            await ctx.send("❌ 削除対象のユーザーを指定してください。\n使用例: `!purge_user @ユーザー名`")
             return
             
-        if limit <= 0 or limit > 1000:
-            await ctx.send("削除するメッセージ数は1から1000の間で指定してください。")
-            return
-            
-        # server_wideパラメータの処理
-        is_server_wide = False
-        if server_wide is not None:
-            server_wide = server_wide.lower()
-            is_server_wide = server_wide in ["yes", "y", "true", "t", "1", "on", "enable", "server", "all"]
+        # limitが0または負の場合は制限なし（実質的に大きな値を設定）
+        if limit <= 0:
+            limit = 1000000  # 実質無制限
+            limit_text = "すべての"
+        else:
+            limit_text = f"最大{limit}件の"
             
         # 警告メッセージの準備
-        target_scope = "サーバー全体" if is_server_wide else "このチャンネル"
-        warning_text = f"⚠️ **{target_scope}**から**{user.display_name}**のメッセージを最大{limit}件削除しますか？\n"
-        
-        if is_server_wide:
-            warning_text += "**⚠️ 警告: この操作はサーバー内のすべてのチャンネルに影響します！⚠️**\n"
-            warning_text += "処理には時間がかかる場合があります。\n"
-        
+        warning_text = f"⚠️ **サーバー全体**から**{user.display_name}**の{limit_text}メッセージを削除しますか？\n"
+        warning_text += "**⚠️ 警告: この操作はサーバー内のすべてのチャンネルに影響します！⚠️**\n"
+        warning_text += "**⚠️ この処理はAPIレート制限により非常に時間がかかる場合があります！⚠️**\n"
         warning_text += f"確認するには✅リアクションを、キャンセルするには❌リアクションを付けてください。\n"
         warning_text += f"30秒後にタイムアウトします。"
         
@@ -852,10 +844,11 @@ class Gemini(commands.Cog):
                 deleted_count = 0
                 error_channels = []
                 rate_limited_count = 0
+                failed_messages = []  # 削除に失敗したメッセージを記録
                 
                 # レート制限対応のための削除関数
-                async def delete_with_rate_limit(channel, messages):
-                    nonlocal deleted_count, rate_limited_count
+                async def delete_with_rate_limit(channel, messages, retry_count=0):
+                    nonlocal deleted_count, rate_limited_count, failed_messages
                     
                     if not messages:
                         return
@@ -883,14 +876,19 @@ class Gemini(commands.Cog):
                                     await delete_single_message(channel, msg)
                             else:
                                 self.logger.error(f"Error bulk deleting messages: {e}")
+                                # エラーが発生した場合、個別に削除を試みる
+                                for msg in recent_messages:
+                                    await delete_single_message(channel, msg)
                     
                     # 古いメッセージは個別に削除
                     for msg in old_messages:
                         await delete_single_message(channel, msg)
                 
                 # 個別メッセージ削除関数
-                async def delete_single_message(channel, message):
-                    nonlocal deleted_count, rate_limited_count
+                async def delete_single_message(channel, message, retry_count=0):
+                    nonlocal deleted_count, rate_limited_count, failed_messages
+                    
+                    max_retries = 5  # 最大再試行回数
                     
                     try:
                         await message.delete()
@@ -902,93 +900,128 @@ class Gemini(commands.Cog):
                             rate_limited_count += 1
                             retry_after = e.retry_after if hasattr(e, 'retry_after') else 1
                             # 指数バックオフ（リトライ回数に応じて待機時間を増加）
-                            backoff = min(retry_after * (1.5 ** min(rate_limited_count, 5)), 10)
+                            backoff = min(retry_after * (1.5 ** min(rate_limited_count, 5)), 15)
                             await status_msg.edit(content=f"⏳ レート制限に達しました。{backoff:.1f}秒待機中... (削除済み: {deleted_count}件)")
                             await asyncio.sleep(backoff)
+                            
                             # 再試行
-                            try:
-                                await message.delete()
-                                deleted_count += 1
-                                await asyncio.sleep(1.0)  # 成功後は長めに待機
-                            except Exception:
-                                pass  # 再試行失敗は無視
+                            if retry_count < max_retries:
+                                await delete_single_message(channel, message, retry_count + 1)
+                            else:
+                                # 最大再試行回数に達した場合は記録
+                                failed_messages.append((channel, message))
                         elif e.code != 404:  # 404はメッセージが既に削除されている場合
                             self.logger.error(f"Error deleting message: {e}")
+                            if retry_count < max_retries:
+                                # 他のエラーでも再試行
+                                await asyncio.sleep(2)  # エラー後は長めに待機
+                                await delete_single_message(channel, message, retry_count + 1)
+                            else:
+                                # 最大再試行回数に達した場合は記録
+                                failed_messages.append((channel, message))
+                    except Exception as e:
+                        self.logger.error(f"Unexpected error deleting message: {e}")
+                        if retry_count < max_retries:
+                            await asyncio.sleep(2)
+                            await delete_single_message(channel, message, retry_count + 1)
+                        else:
+                            failed_messages.append((channel, message))
                 
-                if is_server_wide:
-                    # サーバー全体の処理
-                    progress_msg = await ctx.send("0% 完了")
-                    total_channels = len(ctx.guild.text_channels)
-                    processed_channels = 0
+                # 失敗したメッセージの再試行関数
+                async def retry_failed_messages():
+                    nonlocal failed_messages
                     
-                    for channel in ctx.guild.text_channels:
+                    if not failed_messages:
+                        return
+                        
+                    await status_msg.edit(content=f"🔄 削除に失敗したメッセージを再試行中... ({len(failed_messages)}件)")
+                    
+                    # 失敗したメッセージのコピーを作成（処理中にリストが変更される可能性があるため）
+                    messages_to_retry = failed_messages.copy()
+                    failed_messages = []
+                    
+                    # 長めの間隔を空けて再試行
+                    for channel, message in messages_to_retry:
                         try:
-                            # チャンネルにアクセスできるか確認
-                            if not channel.permissions_for(ctx.guild.me).manage_messages:
-                                error_channels.append(f"{channel.name} (権限不足)")
-                                continue
-                                
-                            # 進捗状況を更新
-                            processed_channels += 1
-                            progress = int((processed_channels / total_channels) * 100)
-                            await progress_msg.edit(content=f"{progress}% 完了 - {channel.name}を処理中... (削除済み: {deleted_count}件)")
-                            
-                            # メッセージ取得
-                            messages_to_delete = []
-                            async for msg in channel.history(limit=limit):
-                                if is_user(msg):
-                                    messages_to_delete.append(msg)
-                                    
-                                    # バッチサイズに達したら削除実行
-                                    if len(messages_to_delete) >= 20:
-                                        await delete_with_rate_limit(channel, messages_to_delete)
-                                        messages_to_delete = []
-                                        # 進捗更新
-                                        await progress_msg.edit(content=f"{progress}% 完了 - {channel.name}を処理中... (削除済み: {deleted_count}件)")
-                            
-                            # 残りのメッセージを削除
-                            if messages_to_delete:
-                                await delete_with_rate_limit(channel, messages_to_delete)
-                            
-                        except discord.Forbidden:
-                            error_channels.append(f"{channel.name} (権限不足)")
-                        except Exception as e:
-                            self.logger.error(f"Error purging messages in {channel.name}: {e}")
-                            error_channels.append(f"{channel.name} (エラー: {str(e)})")
+                            await message.delete()
+                            deleted_count += 1
+                            await asyncio.sleep(1.2)  # 再試行時は長めの間隔
+                        except Exception:
+                            # 再試行でも失敗した場合は記録
+                            failed_messages.append((channel, message))
                     
-                    # 進捗メッセージを削除
-                    await progress_msg.delete()
-                else:
-                    # 単一チャンネルの処理
+                    # 再試行後も失敗したメッセージがある場合
+                    if failed_messages:
+                        await asyncio.sleep(5)  # 長めの待機
+                        await retry_failed_messages()  # 再帰的に再試行
+                
+                # サーバー全体の処理
+                progress_msg = await ctx.send("0% 完了")
+                total_channels = len(ctx.guild.text_channels)
+                processed_channels = 0
+                
+                for channel in ctx.guild.text_channels:
                     try:
+                        # チャンネルにアクセスできるか確認
+                        if not channel.permissions_for(ctx.guild.me).manage_messages:
+                            error_channels.append(f"{channel.name} (権限不足)")
+                            continue
+                            
+                        # 進捗状況を更新
+                        processed_channels += 1
+                        progress = int((processed_channels / total_channels) * 100)
+                        await progress_msg.edit(content=f"{progress}% 完了 - {channel.name}を処理中... (削除済み: {deleted_count}件)")
+                        
+                        # メッセージ取得
                         messages_to_delete = []
-                        async for msg in ctx.channel.history(limit=limit):
+                        message_count = 0
+                        
+                        # スキャン
+                        scan_limit = 1000  # 各チャンネルでスキャンするメッセージ数
+                        
+                        async for msg in channel.history(limit=scan_limit):
+                            message_count += 1
                             if is_user(msg):
                                 messages_to_delete.append(msg)
                                 
                                 # バッチサイズに達したら削除実行
                                 if len(messages_to_delete) >= 20:
-                                    await delete_with_rate_limit(ctx.channel, messages_to_delete)
+                                    await delete_with_rate_limit(channel, messages_to_delete)
                                     messages_to_delete = []
                                     # 進捗更新
-                                    await status_msg.edit(content=f"🔍 {user.display_name}のメッセージを削除中... (削除済み: {deleted_count}件)")
+                                    await progress_msg.edit(content=f"{progress}% 完了 - {channel.name}を処理中... (削除済み: {deleted_count}件)")
+                            
+                            # 指定した制限に達した場合は終了
+                            if limit > 0 and deleted_count >= limit:
+                                break
                         
                         # 残りのメッセージを削除
                         if messages_to_delete:
-                            await delete_with_rate_limit(ctx.channel, messages_to_delete)
-                            
+                            await delete_with_rate_limit(channel, messages_to_delete)
+                        
                     except discord.Forbidden:
-                        await status_msg.edit(content="❌ メッセージを削除する権限がありません。")
-                        return
+                        error_channels.append(f"{channel.name} (権限不足)")
                     except Exception as e:
-                        self.logger.error(f"Error purging messages: {e}")
-                        await status_msg.edit(content=f"❌ エラーが発生しました: {str(e)}")
-                        return
+                        self.logger.error(f"Error purging messages in {channel.name}: {e}")
+                        error_channels.append(f"{channel.name} (エラー: {str(e)})")
+                
+                # 進捗メッセージを削除
+                await progress_msg.delete()
+                
+                # 失敗したメッセージを再試行
+                if failed_messages:
+                    await retry_failed_messages()
                 
                 # 結果報告
-                result_msg = f"✅ {user.display_name}のメッセージを{deleted_count}件削除しました。"
+                limit_text = "すべての" if limit == 1000000 else f"{limit}件の"
+                result_msg = f"✅ {user.display_name}の{limit_text}メッセージを{deleted_count}件削除しました。"
+                
                 if rate_limited_count > 0:
                     result_msg += f"\n⚠️ 処理中に{rate_limited_count}回のレート制限が発生しました。"
+                
+                if failed_messages:
+                    result_msg += f"\n⚠️ {len(failed_messages)}件のメッセージを削除できませんでした。再試行しましたが失敗しました。"
+                
                 if error_channels:
                     result_msg += f"\n⚠️ 以下のチャンネルでエラーが発生しました：\n" + "\n".join(error_channels[:10])
                     if len(error_channels) > 10:
@@ -1006,18 +1039,3 @@ class Gemini(commands.Cog):
             await confirm_msg.delete()
         except:
             pass
-
-    @commands.command()
-    @commands.has_role("Parent")
-    async def purge_user_server(self, ctx, user: discord.Member = None, limit: int = 100):
-        """サーバー全体から指定したユーザーのメッセージを一括削除します"""
-        # DMでの使用を検出してエラーメッセージを表示
-        if not ctx.guild:
-            await ctx.send("❌ このコマンドはサーバー内でのみ使用できます。DMでは使用できません。")
-            return
-            
-        if user is None:
-            await ctx.send("❌ 削除対象のユーザーを指定してください。\n使用例: `!purge_user_server @ユーザー名 100`")
-            return
-            
-        await self.purge_user(ctx, user, limit, server_wide="yes")
