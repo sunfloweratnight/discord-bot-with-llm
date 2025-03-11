@@ -873,9 +873,21 @@ class Gemini(commands.Cog):
                                     
                                     if messages:
                                         # 14日以上前のメッセージは一括削除できないので個別に削除
-                                        now = datetime.datetime.utcnow()
-                                        old_messages = [msg for msg in messages if (now - msg.created_at).days >= 14]
-                                        new_messages = [msg for msg in messages if (now - msg.created_at).days < 14]
+                                        now = datetime.datetime.now(datetime.timezone.utc)  # タイムゾーン付きで現在時刻を取得
+                                        old_messages = []
+                                        new_messages = []
+                                        
+                                        for msg in messages:
+                                            # メッセージの作成時刻をUTC with timezoneに統一
+                                            msg_time = msg.created_at
+                                            if msg_time.tzinfo is None:
+                                                msg_time = msg_time.replace(tzinfo=datetime.timezone.utc)
+                                                
+                                            # 14日以上前かどうかを判定
+                                            if (now - msg_time).days >= 14:
+                                                old_messages.append(msg)
+                                            else:
+                                                new_messages.append(msg)
                                         
                                         # 新しいメッセージは一括削除
                                         if new_messages:
@@ -887,8 +899,8 @@ class Gemini(commands.Cog):
                                                 await msg.delete()
                                                 # レート制限を避けるため少し待機
                                                 await asyncio.sleep(0.5)
-                                            except:
-                                                pass
+                                            except Exception as e:
+                                                self.logger.error(f"Error deleting old message: {e}")
                                         
                                         total_deleted += len(messages)
                                         deleted_count += len(messages)
@@ -943,9 +955,21 @@ class Gemini(commands.Cog):
                             
                             if messages:
                                 # 14日以上前のメッセージは一括削除できないので個別に削除
-                                now = datetime.datetime.utcnow()
-                                old_messages = [msg for msg in messages if (now - msg.created_at).days >= 14]
-                                new_messages = [msg for msg in messages if (now - msg.created_at).days < 14]
+                                now = datetime.datetime.now(datetime.timezone.utc)  # タイムゾーン付きで現在時刻を取得
+                                old_messages = []
+                                new_messages = []
+                                
+                                for msg in messages:
+                                    # メッセージの作成時刻をUTC with timezoneに統一
+                                    msg_time = msg.created_at
+                                    if msg_time.tzinfo is None:
+                                        msg_time = msg_time.replace(tzinfo=datetime.timezone.utc)
+                                        
+                                    # 14日以上前かどうかを判定
+                                    if (now - msg_time).days >= 14:
+                                        old_messages.append(msg)
+                                    else:
+                                        new_messages.append(msg)
                                 
                                 # 新しいメッセージは一括削除
                                 if new_messages:
@@ -957,8 +981,8 @@ class Gemini(commands.Cog):
                                         await msg.delete()
                                         # レート制限を避けるため少し待機
                                         await asyncio.sleep(0.5)
-                                    except:
-                                        pass
+                                    except Exception as e:
+                                        self.logger.error(f"Error deleting old message: {e}")
                                 
                                 total_deleted += len(messages)
                                 deleted_count += len(messages)
