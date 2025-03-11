@@ -743,7 +743,7 @@ class Gemini(commands.Cog):
                         await ctx.reply("この操作にはParent権限が必要です。")
                         return True
                 
-                # ユーザーを検索
+                # ユーザーまたはBotを検索
                 found_member = None
                 for member in ctx.guild.members:
                     if (user_name.lower() in member.display_name.lower() or 
@@ -775,10 +775,10 @@ class Gemini(commands.Cog):
     @commands.command()
     @commands.has_role("Parent")
     async def purge_user(self, ctx, user: discord.Member = None, limit: int = 100, *, server_wide: bool = False):
-        """指定したユーザーのメッセージを一括削除します
+        """指定したユーザーまたはBotのメッセージを一括削除します
         
         引数:
-        user: 削除対象のユーザー
+        user: 削除対象のユーザーまたはBot
         limit: 削除するメッセージの最大件数 (デフォルト: 100)
         server_wide: サーバー全体から検索して削除するかどうか (デフォルト: False)
         """
@@ -788,7 +788,7 @@ class Gemini(commands.Cog):
             return
             
         if user is None:
-            await ctx.send("❌ 削除対象のユーザーを指定してください。\n使用例: `!purge_user @ユーザー名 100`")
+            await ctx.send("❌ 削除対象のユーザーまたはBotを指定してください。\n使用例: `!purge_user @ユーザー名 100`")
             return
             
         if limit <= 0 or limit > 1000:
@@ -797,7 +797,8 @@ class Gemini(commands.Cog):
             
         # 警告メッセージの準備
         target_scope = "サーバー全体" if server_wide else "このチャンネル"
-        warning_text = f"⚠️ **{target_scope}**から**{user.display_name}**のメッセージを最大{limit}件削除しますか？\n"
+        user_type = "Bot" if user.bot else "ユーザー"
+        warning_text = f"⚠️ **{target_scope}**から**{user.display_name}**({user_type})のメッセージを最大{limit}件削除しますか？\n"
         
         if server_wide:
             warning_text += "**⚠️ 警告: この操作はサーバー内のすべてのチャンネルに影響します！⚠️**\n"
@@ -821,7 +822,8 @@ class Gemini(commands.Cog):
             reaction, reactor = await self.bot.wait_for('reaction_add', timeout=30.0, check=check)
             
             if str(reaction.emoji) == "✅":
-                status_msg = await ctx.send(f"🔍 {user.display_name}のメッセージを検索中...")
+                user_type_str = "Bot" if user.bot else "ユーザー"
+                status_msg = await ctx.send(f"🔍 {user.display_name}({user_type_str})のメッセージを検索中...")
                 
                 def is_user(m):
                     return m.author == user
@@ -876,7 +878,7 @@ class Gemini(commands.Cog):
                         return
                 
                 # 結果報告
-                result_msg = f"✅ {user.display_name}のメッセージを{deleted_count}件削除しました。"
+                result_msg = f"✅ {user.display_name}({user_type_str})のメッセージを{deleted_count}件削除しました。"
                 if error_channels:
                     result_msg += f"\n⚠️ 以下のチャンネルでエラーが発生しました：\n" + "\n".join(error_channels[:10])
                     if len(error_channels) > 10:
