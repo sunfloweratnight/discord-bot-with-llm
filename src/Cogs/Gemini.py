@@ -845,7 +845,7 @@ class Gemini(commands.Cog):
             
         # limitが0または負の場合は制限なし（実質的に大きな値を設定）
         if limit <= 0:
-            limit = 1000000  # 実質無制限
+            limit = 10000000  # 実質無制限
             limit_text = "すべての"
         else:
             limit_text = f"最大{limit}件の"
@@ -854,6 +854,7 @@ class Gemini(commands.Cog):
         warning_text = f"⚠️ **サーバー全体**から**{target_user.display_name}**の{limit_text}メッセージを削除しますか？\n"
         warning_text += "**⚠️ 警告: この操作はサーバー内のすべてのチャンネルに影響します！⚠️**\n"
         warning_text += "**⚠️ この処理はAPIレート制限により非常に時間がかかる場合があります！⚠️**\n"
+        warning_text += "**⚠️ 大量のメッセージを削除する場合、複数回の処理が必要になることがあります！⚠️**\n"
         warning_text += f"確認するには✅リアクションを、キャンセルするには❌リアクションを付けてください。\n"
         warning_text += f"30秒後にタイムアウトします。"
         
@@ -897,10 +898,13 @@ class Gemini(commands.Cog):
                     # 最近のメッセージは一括削除
                     if recent_messages:
                         try:
-                            await channel.delete_messages(recent_messages)
-                            deleted_count += len(recent_messages)
-                            # 一括削除後の待機（レート制限対策）
-                            await asyncio.sleep(1.5)
+                            # 一度に削除するメッセージ数を制限（100件まで）
+                            for i in range(0, len(recent_messages), 100):
+                                batch = recent_messages[i:i+100]
+                                await channel.delete_messages(batch)
+                                deleted_count += len(batch)
+                                # 一括削除後の待機（レート制限対策）
+                                await asyncio.sleep(1.5)
                         except discord.errors.HTTPException as e:
                             if e.code == 429:  # レート制限
                                 rate_limited_count += 1
@@ -996,6 +1000,7 @@ class Gemini(commands.Cog):
                 total_channels = len(ctx.guild.text_channels)
                 processed_channels = 0
                 
+                # 各チャンネルでの処理
                 for channel in ctx.guild.text_channels:
                     try:
                         # チャンネルにアクセスできるか確認
@@ -1008,32 +1013,60 @@ class Gemini(commands.Cog):
                         progress = int((processed_channels / total_channels) * 100)
                         await progress_msg.edit(content=f"{progress}% 完了 - {channel.name}を処理中... (削除済み: {deleted_count}件)")
                         
-                        # メッセージ取得
-                        messages_to_delete = []
-                        message_count = 0
+                        # 複数回のスキャンを行う
+                        scan_count = 0
+                        max_scans = 10  # 最大スキャン回数
+                        found_messages = True  # 初回はスキャンを実行するためTrue
+                        oldest_message_id = None
                         
-                        # スキャン
-                        scan_limit = 1000  # 各チャンネルでスキャンするメッセージ数
-                        
-                        async for msg in channel.history(limit=scan_limit):
-                            message_count += 1
-                            if is_user(msg):
-                                messages_to_delete.append(msg)
-                                
-                                # バッチサイズに達したら削除実行
-                                if len(messages_to_delete) >= 20:
-                                    await delete_with_rate_limit(channel, messages_to_delete)
-                                    messages_to_delete = []
-                                    # 進捗更新
-                                    await progress_msg.edit(content=f"{progress}% 完了 - {channel.name}を処理中... (削除済み: {deleted_count}件)")
+                        while found_messages and scan_count < max_scans and (limit <= 0 or deleted_count < limit):
+                            scan_count += 1
+                            found_messages = False
                             
-                            # 指定した制限に達した場合は終了
-                            if limit > 0 and deleted_count >= limit:
+                            # メッセージ取得
+                            messages_to_delete = []
+                            
+                            # スキャン（1回あたり最大5000件）
+                            scan_limit = 5000
+                            
+                            # 前回のスキャンの最古メッセージより前を検索
+                            kwargs = {}
+                            if oldest_message_id:
+                                kwargs['before'] = discord.Object(id=oldest_message_id)
+                            
+                            message_count = 0
+                            async for msg in channel.history(limit=scan_limit, **kwargs):
+                                message_count += 1
+                                
+                                # 最古のメッセージIDを更新
+                                if message_count == scan_limit:
+                                    oldest_message_id = msg.id
+                                    
+                                if is_user(msg):
+                                    found_messages = True
+                                    messages_to_delete.append(msg)
+                                    
+                                    # バッチサイズに達したら削除実行
+                                    if len(messages_to_delete) >= 20:
+                                        await delete_with_rate_limit(channel, messages_to_delete)
+                                        messages_to_delete = []
+                                        # 進捗更新
+                                        await progress_msg.edit(content=f"{progress}% 完了 - {channel.name}を処理中... (スキャン{scan_count}/{max_scans}, 削除済み: {deleted_count}件)")
+                                
+                                # 指定した制限に達した場合は終了
+                                if limit > 0 and deleted_count >= limit:
+                                    break
+                            
+                            # 残りのメッセージを削除
+                            if messages_to_delete:
+                                await delete_with_rate_limit(channel, messages_to_delete)
+                                
+                            # メッセージが見つからなかった場合や、スキャン上限に達しなかった場合は終了
+                            if message_count < scan_limit:
                                 break
-                        
-                        # 残りのメッセージを削除
-                        if messages_to_delete:
-                            await delete_with_rate_limit(channel, messages_to_delete)
+                                
+                            # スキャン間の待機
+                            await asyncio.sleep(1)
                         
                     except discord.Forbidden:
                         error_channels.append(f"{channel.name} (権限不足)")
@@ -1049,7 +1082,7 @@ class Gemini(commands.Cog):
                     await retry_failed_messages()
                 
                 # 結果報告
-                limit_text = "すべての" if limit == 1000000 else f"{limit}件の"
+                limit_text = "すべての" if limit >= 10000000 else f"{limit}件の"
                 result_msg = f"✅ {target_user.display_name}の{limit_text}メッセージを{deleted_count}件削除しました。"
                 
                 if rate_limited_count > 0:
@@ -1062,6 +1095,11 @@ class Gemini(commands.Cog):
                     result_msg += f"\n⚠️ 以下のチャンネルでエラーが発生しました：\n" + "\n".join(error_channels[:10])
                     if len(error_channels) > 10:
                         result_msg += f"\n...他{len(error_channels) - 10}チャンネル"
+                
+                # 削除が少ない場合の追加メッセージ
+                if deleted_count < 10000 and limit >= 10000000:
+                    result_msg += f"\n\n💡 削除されたメッセージが予想より少ない場合は、コマンドを複数回実行してみてください。"
+                    result_msg += f"\n💡 Discordの仕様により、非常に古いメッセージは一度に検出できない場合があります。"
                 
                 await status_msg.edit(content=result_msg)
             else:
