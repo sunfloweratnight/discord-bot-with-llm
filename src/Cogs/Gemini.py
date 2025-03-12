@@ -791,11 +791,11 @@ class Gemini(commands.Cog):
 
     @commands.command()
     @commands.has_role("Parent")
-    async def purge_user(self, ctx, user: discord.Member = None, limit: int = 0):
+    async def purge_user(self, ctx, user_input: str = None, limit: int = 0):
         """指定したユーザーのメッセージをサーバー全体から完全に削除します
         
         引数:
-        user: 削除対象のユーザー
+        user_input: 削除対象のユーザー（メンション、ID、ユーザー名のいずれか）
         limit: 削除するメッセージの最大件数 (0=制限なし、デフォルト: 制限なし)
         """
         # DMでの使用を検出してエラーメッセージを表示
@@ -803,9 +803,45 @@ class Gemini(commands.Cog):
             await ctx.send("❌ このコマンドはサーバー内でのみ使用できます。DMでは使用できません。")
             return
             
-        if user is None:
-            await ctx.send("❌ 削除対象のユーザーを指定してください。\n使用例: `!purge_user @ユーザー名`")
+        if user_input is None:
+            await ctx.send("❌ 削除対象のユーザーを指定してください。\n使用例: `!purge_user @ユーザー名` または `!purge_user ユーザーID`")
             return
+        
+        # ユーザー入力からユーザーを特定
+        target_user = None
+        user_id = None
+        display_name = None
+        
+        # メンションからIDを抽出
+        mention_match = re.match(r'<@!?(\d+)>', user_input)
+        if mention_match:
+            user_id = int(mention_match.group(1))
+        # 数字のみの場合はIDとして扱う
+        elif user_input.isdigit():
+            user_id = int(user_input)
+        # それ以外はユーザー名として扱う
+        else:
+            display_name = user_input
+        
+        # IDからユーザーを検索
+        if user_id:
+            try:
+                target_user = await self.bot.fetch_user(user_id)
+            except discord.NotFound:
+                await ctx.send(f"❌ ID: {user_id} のユーザーが見つかりませんでした。")
+                return
+        # 名前からメンバーを検索（サーバーに存在する場合のみ）
+        elif display_name:
+            for member in ctx.guild.members:
+                if (display_name.lower() in member.display_name.lower() or 
+                    display_name.lower() in member.name.lower() or 
+                    (member.nick and display_name.lower() in member.nick.lower())):
+                    target_user = member
+                    break
+            
+            if not target_user:
+                await ctx.send(f"❌ '{display_name}' というユーザーが見つかりませんでした。IDで指定してみてください。")
+                return
             
         # limitが0または負の場合は制限なし（実質的に大きな値を設定）
         if limit <= 0:
@@ -815,7 +851,7 @@ class Gemini(commands.Cog):
             limit_text = f"最大{limit}件の"
             
         # 警告メッセージの準備
-        warning_text = f"⚠️ **サーバー全体**から**{user.display_name}**の{limit_text}メッセージを削除しますか？\n"
+        warning_text = f"⚠️ **サーバー全体**から**{target_user.display_name}**の{limit_text}メッセージを削除しますか？\n"
         warning_text += "**⚠️ 警告: この操作はサーバー内のすべてのチャンネルに影響します！⚠️**\n"
         warning_text += "**⚠️ この処理はAPIレート制限により非常に時間がかかる場合があります！⚠️**\n"
         warning_text += f"確認するには✅リアクションを、キャンセルするには❌リアクションを付けてください。\n"
@@ -836,10 +872,10 @@ class Gemini(commands.Cog):
             reaction, reactor = await self.bot.wait_for('reaction_add', timeout=30.0, check=check)
             
             if str(reaction.emoji) == "✅":
-                status_msg = await ctx.send(f"🔍 {user.display_name}のメッセージを検索中...")
+                status_msg = await ctx.send(f"🔍 {target_user.display_name}のメッセージを検索中...")
                 
                 def is_user(m):
-                    return m.author == user
+                    return m.author.id == target_user.id
                 
                 deleted_count = 0
                 error_channels = []
@@ -1014,7 +1050,7 @@ class Gemini(commands.Cog):
                 
                 # 結果報告
                 limit_text = "すべての" if limit == 1000000 else f"{limit}件の"
-                result_msg = f"✅ {user.display_name}の{limit_text}メッセージを{deleted_count}件削除しました。"
+                result_msg = f"✅ {target_user.display_name}の{limit_text}メッセージを{deleted_count}件削除しました。"
                 
                 if rate_limited_count > 0:
                     result_msg += f"\n⚠️ 処理中に{rate_limited_count}回のレート制限が発生しました。"
