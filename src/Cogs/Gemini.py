@@ -997,11 +997,17 @@ class Gemini(commands.Cog):
                 
                 # サーバー全体の処理
                 progress_msg = await ctx.send("0% 完了")
-                total_channels = len(ctx.guild.text_channels)
+                
+                # テキストチャンネル、スレッド、ボイスチャットを取得
+                text_channels = ctx.guild.text_channels
+                threads = [thread for channel in text_channels for thread in channel.threads]
+                voice_channels = ctx.guild.voice_channels
+                
+                total_channels = len(text_channels) + len(threads) + len(voice_channels)
                 processed_channels = 0
                 
                 # 各チャンネルでの処理
-                for channel in ctx.guild.text_channels:
+                for channel in text_channels + threads + voice_channels:
                     try:
                         # チャンネルにアクセスできるか確認
                         if not channel.permissions_for(ctx.guild.me).manage_messages:
@@ -1011,7 +1017,8 @@ class Gemini(commands.Cog):
                         # 進捗状況を更新
                         processed_channels += 1
                         progress = int((processed_channels / total_channels) * 100)
-                        await progress_msg.edit(content=f"{progress}% 完了 - {channel.name}を処理中... (削除済み: {deleted_count}件)")
+                        channel_type = "スレッド" if isinstance(channel, discord.Thread) else "ボイスチャット" if isinstance(channel, discord.VoiceChannel) else "チャンネル"
+                        await progress_msg.edit(content=f"{progress}% 完了 - {channel.name} ({channel_type})を処理中... (削除済み: {deleted_count}件)")
                         
                         # 複数回のスキャンを行う
                         scan_count = 0
