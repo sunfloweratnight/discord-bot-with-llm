@@ -6,6 +6,8 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str
     GEMINI_API_KEY: str
     INITIAL_PROMPT: str
+    # TypeSafe Jev (運勢). Optional so the bot can boot without it; Fortune cog checks at runtime.
+    TYPESAFE_API_KEY: str = ""
     # COHERE_API_KEY: str
     # POSTGRES_HOSTNAME: str
     # POSTGRES_PORT: str

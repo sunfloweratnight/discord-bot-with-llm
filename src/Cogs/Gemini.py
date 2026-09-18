@@ -629,6 +629,7 @@ class Gemini(commands.Cog):
         # コマンドの説明を辞書で定義
         commands_help = {
             "gem": "AIと会話します",
+            "運勢": "直近の発言から今日の運勢を占います（別名: !fortune）",
             "save_message": "メッセージをデータベースに保存します",
             "get_messages": "保存されたメッセージを表示します",
             "set_history_limit": "チャット履歴の制限を設定します (1-50の間)",
@@ -658,7 +659,7 @@ class Gemini(commands.Cog):
                 if is_parent:
                     available_commands.append((cmd_name, cmd_desc))
             # Parent/Toddler共用コマンド
-            elif cmd_name in ["gem", "save_message", "get_messages", "set_history_limit"]:
+            elif cmd_name in ["gem", "運勢", "save_message", "get_messages", "set_history_limit"]:
                 if is_parent or is_toddler:
                     available_commands.append((cmd_name, cmd_desc))
             # 誰でも使えるコマンド

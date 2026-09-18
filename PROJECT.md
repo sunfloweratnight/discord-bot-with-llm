@@ -54,10 +54,10 @@ Dependencies: `requirements.txt`.
 
 ### Deploy notes (Koyeb)
 
-- Live bot = Koyeb service env (especially `GEMINI_API_KEY`, `DISCORD_API_KEY`).
-- GitHub OAuth to Koyeb may be used for login; **this repo currently has no GitHub webhooks**, so auto-deploy linkage is not visible from GitHub alone — confirm branch/commit in the Koyeb dashboard.
+- Live bot = Koyeb service env (especially `GEMINI_API_KEY`, `DISCORD_API_KEY`, `TYPESAFE_API_KEY`).
+- GitHub OAuth to Koyeb may be used for login; confirm branch/commit in the Koyeb dashboard for auto-deploy.
 - On Gemini `API_KEY_INVALID`, the bot replies in Japanese asking to refresh `GEMINI_API_KEY` on Koyeb (raw Google error text is not shown to users).
-
+- On missing/invalid Jev key, `!運勢` replies asking to check `TYPESAFE_API_KEY` on Koyeb.
 ---
 
 ## 4. Repository structure
@@ -71,18 +71,21 @@ discord-bot-with-llm/
 ├── requirements.txt
 ├── dockerfile
 ├── .env                    ← secrets (not committed)
-└── src/
-    ├── DiscordBot.py       ← Bot subclass; loads cogs
-    ├── Logger.py           ← console logging factory
-    ├── Session.py          ← async SQLAlchemy session generator
-    ├── Entities.py         ← ORM models (Message + embedding column)
-    ├── Models.py           ← Pydantic DTOs (Message / MessagePayload)
-    ├── Repositories.py     ← generic CRUD repository
-    ├── Migrate.py          ← create_all table sync (manual)
-    └── Cogs/
-        ├── Gemini.py       ← LLM chat, engagement, Parent tools
-        ├── RoleOperation.py← roles, reactions, slash admin
-        └── Utils.py        ← argument sanitization
+├── src/
+│   ├── DiscordBot.py       ← Bot subclass; loads cogs
+│   ├── Logger.py           ← console logging factory
+│   ├── Session.py          ← async SQLAlchemy session generator
+│   ├── Entities.py         ← ORM models (Message + embedding column)
+│   ├── Models.py           ← Pydantic DTOs (Message / MessagePayload)
+│   ├── Repositories.py     ← generic CRUD repository
+│   ├── Migrate.py          ← create_all table sync (manual)
+│   ├── FortuneSchema.py    ← Jev 運勢 questions + state/result helpers
+│   ├── JevClient.py        ← Async TypeSafe Jev wrapper
+│   └── Cogs/
+│       ├── Gemini.py       ← LLM chat, engagement, Parent tools
+│       ├── Fortune.py      ← `!運勢` / `!fortune`
+│       ├── RoleOperation.py← roles, reactions, slash admin
+│       └── Utils.py        ← argument sanitization
 ```
 
 ### Responsibility map
@@ -93,6 +96,7 @@ discord-bot-with-llm/
 | `DiscordBot` | Intents, cog registration, token start |
 | `RoleOperation` | Join/first-word roles, reaction curation, slash sync/shutdown |
 | `Gemini` | Mentions / `!gem`, chat history context, periodic infant check, Parent utilities |
+| `Fortune` | `!運勢` / `!fortune` via Jev |
 | `Config` | Required env vars and channel/guild IDs |
 
 ---
@@ -107,6 +111,7 @@ Defined in `Config.Settings` (loaded from `.env`):
 |----------|---------|
 | `DISCORD_API_KEY` | Bot token |
 | `GEMINI_API_KEY` | Google Generative AI |
+| `TYPESAFE_API_KEY` | TypeSafe Jev（`!運勢`）。未設定でも起動可。コマンド実行時に日本語エラー |
 | `OPENAI_API_KEY` | Present in settings; **not used** by current Gemini path |
 | `INITIAL_PROMPT` | System-style seed for Gemini chat history |
 | `LOG_CHANNEL_ID` | Join / first-word / shutdown notices |
@@ -311,8 +316,106 @@ Documented so agents do not “rediscover” them as mysteries:
 
 **Anyone:** `!help_command`
 
-**Parent / Toddler:** `!gem`, `!save_message`, `!get_messages`, `!set_history_limit`
+**Parent / Toddler:** `!gem`, `!運勢` / `!fortune`, `!save_message`, `!get_messages`, `!set_history_limit`
 
 **Parent:** periodic check controls, channel/permission sync, `!check_infant`, `!discuss_topic`, `!purge_user`, prompt show/set/reset (guild)
 
 **Mention:** `@bot <message>` → Gemini reply with channel history context
+
+**Fortune:** `!運勢` / `!fortune` → Jev decision + Discord embed (see §13)
+
+---
+
+## 13. Feature — 運勢占い (Jev) 【実装済み・推奨パターン】
+
+> Status: **implemented**. Set `TYPESAFE_API_KEY` on Koyeb (and optionally local `.env`).
+> Do not reopen product choices below unless this section is explicitly revised.
+
+### 13.1 Product decisions (frozen)
+
+| Topic | Decision |
+|-------|----------|
+| Trigger | Prefix only: `!運勢` and `!fortune` (aliases). **Not** every `@bot` mention. |
+| Existing Gemini chat | Unchanged (`@bot` / `!gem` stay free-form chat). |
+| Who can run | `Parent` or `Toddler` (same as `!gem`). Infants: friendly deny or ignore. |
+| Message sample | **Current channel only.** Last **10** messages by the invoking author (exclude bots, empty content). Oldest→newest in `state`. |
+| If fewer than 10 | Use whatever exists (min 1). If **0** usable messages → reply that there is not enough speech history; do not call Jev. |
+| Decision engine | **TypeSafe Jev** (`jev-latest`) via `POST https://api.typesafe.ai/v1/systemone` or `typesafe-sdk`. |
+| Schema style | Jev typed `questions` (Choice / Score / Noul). Not free-form LLM JSON. |
+| “Highest probability” | For each `Choice`, take API `.choice` (argmax). Optionally show top probability % in the embed footer/field. |
+| User-facing copy | **Template / Discord Embed only** for v1 (no Gemini prose pass). Fast, cheap, no second-model dependency for this feature. |
+| Hosting | Deploy via existing **GitHub → Koyeb** pipeline after merge to `main`. |
+
+### 13.2 Jev fortune schema (v1)
+
+Single request, shared `state`, parallel questions:
+
+| Key | Type | Criteria / levels |
+|-----|------|-------------------|
+| `overall` | Choice | `大吉`, `中吉`, `小吉`, `吉`, `末吉`, `凶`, `大凶` |
+| `love` | Choice | `絶好調`, `順調`, `普通`, `注意`, `低調` |
+| `work` | Choice | same as love |
+| `money` | Choice | same as love |
+| `health` | Choice | same as love |
+| `mood` | Score | 1–5（今日の気分の乗りやすさ） |
+| `caution` | Noul | 「今日は慎重に動いた方がよいか」 |
+| `advice` | Choice | Fixed Japanese advice idioms (≤8 options), e.g. 深呼吸してから動く / 連絡を大切に / 新しいことに触れる / 休息を優先 / 小さな整理をする / 笑うことを意識 / 早寝を心がける / 水を多めに |
+
+Instructions (per question) should tell Jev to infer from the author’s recent messages in `state`, not from calendar astrology alone.
+
+### 13.3 `state` payload shape
+
+Prefer a structured string (or SDK object) including:
+
+- `display_name`, `discord_user_id`
+- `channel_name` / `channel_id`
+- `messages`: numbered list of the 10 texts (and optional timestamps)
+- Optional one-line: current mention/command text if any args after `!運勢`
+
+Do **not** put secrets or other users’ private channel content into `state`.
+
+### 13.4 Discord UX
+
+1. User runs `!運勢` in a text channel.
+2. Bot shows typing, fetches history, calls Jev.
+3. Reply with an **Embed**:
+   - Title: `{display_name} さんの今日の運勢`
+   - Fields: 総合 / 恋愛 / 仕事 / 金運 / 健康 / 気分(Score) / アドバイス
+   - Footer: e.g. `総合の確信度: {confidence:.0%}` or top-choice probability
+   - If `caution.noul` ≥ 0.6, add a short warning line in description
+4. Errors (Japanese, no raw vendor payload):
+   - Missing/invalid `TYPESAFE_API_KEY` → 「運勢APIのキーが未設定か無効です。Koyebの環境変数を確認してください。」
+   - Timeout / upstream → 「占いに失敗しました。しばらくして再試行してください。」
+   - Log full error server-side only.
+
+### 13.5 Code layout (implementation map)
+
+| Piece | Where |
+|-------|--------|
+| Env | `Config.Settings.TYPESAFE_API_KEY: str` (required once feature ships; or optional with runtime check) |
+| Schema constants | New `src/FortuneSchema.py` (questions factory + embed formatter) |
+| Jev client wrapper | New `src/JevClient.py` (async-friendly: run sync SDK in executor) |
+| Command | Prefer small cog `src/Cogs/Fortune.py` **or** methods on `Gemini` cog — **prefer new cog** to keep chat vs fortune separated |
+| Wire-up | `DiscordBot.setup_hook` → `add_cog(Fortune(...))` |
+| Deps | `typesafe-sdk` in `requirements.txt` |
+| Docs | This section + `!help_command` entry |
+| Secrets | Set on **Koyeb** env after key is ready; never commit |
+
+### 13.6 Implementation status
+
+Shipped modules: `src/FortuneSchema.py`, `src/JevClient.py`, `src/Cogs/Fortune.py` (registered in `DiscordBot.setup_hook`). Dependency: `typesafe-sdk`.
+
+### 13.7 Non-goals (v1)
+
+- Replacing `@bot` Gemini chat with fortune
+- Guild-wide message scan
+- Birthday / 星座 / 八字 calendars
+- Persisting fortune results to DB
+- Gemini post-processing of fortune prose
+- Natural-language “占って” without prefix (can be v2)
+
+### 13.8 Open only for later (not blocking v1)
+
+- Show full probability bars per Choice
+- Daily cache per user (one fortune / UTC+9 day)
+- Infant-allowed lightweight variant

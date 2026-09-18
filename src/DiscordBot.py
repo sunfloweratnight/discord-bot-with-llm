@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands
 
 from Config import settings
+from src.Cogs.Fortune import Fortune
 from src.Cogs.Gemini import Gemini
 from src.Cogs.RoleOperation import RoleOperation
 from src.Logger import Logger
@@ -27,6 +28,7 @@ class DiscordBot(commands.Bot):
         self.logger.info('Setting up the cogs')
         await self.add_cog(RoleOperation(self, self.logger))
         await self.add_cog(Gemini(self, self.gemini_api_key, self.logger, self.initial_prompt))
+        await self.add_cog(Fortune(self, self.logger))
         self.logger.info('Cogs are set up')
 
     async def get_started(self):
