@@ -48,9 +48,10 @@ It is designed for **one guild** (`GUILD_ID`). **Production hosting is on [Koyeb
 | Keep-alive | Flask on `0.0.0.0:8080` |
 | Hosting | **Koyeb** (primary); Render legacy suspended |
 | DB (scaffold) | SQLAlchemy async + asyncpg + pgvector |
-| Container | `dockerfile` → `python main.py` |
+| Container | `dockerfile` → `uv sync --frozen` → `python main.py` |
+| Package mgmt | **uv** (`pyproject.toml` + committed `uv.lock`) |
 
-Dependencies: `requirements.txt`.
+Dependencies: `pyproject.toml` (lock: `uv.lock`). Dev tests: `uv sync --all-groups` then `uv run pytest`.
 
 ### Deploy notes (Koyeb)
 
@@ -68,9 +69,12 @@ discord-bot-with-llm/
 ├── main.py                 ← entry: keep_alive + DiscordBot
 ├── Config.py               ← Settings from .env
 ├── keep_alive.py           ← Flask “I'm alive” for uptime pings
-├── requirements.txt
+├── pyproject.toml          ← dependencies (uv)
+├── uv.lock                 ← locked resolve (commit this)
+├── .python-version         ← 3.11
 ├── dockerfile
 ├── .env                    ← secrets (not committed)
+├── tests/                  ← pytest (fortune / utils / gemini errors)
 ├── src/
 │   ├── DiscordBot.py       ← Bot subclass; loads cogs
 │   ├── Logger.py           ← console logging factory
@@ -268,10 +272,14 @@ Do not re-enable DB paths without restoring `get_db_url()`, env vars, and an exp
 
 ```bash
 # 1. Create .env with all required Settings fields
-# 2. Install
-pip install -r requirements.txt
+# 2. Install (Python 3.11 via uv)
+uv sync
 # 3. Run
-python main.py
+uv run python main.py
+
+# Tests (includes dev group)
+uv sync --all-groups
+uv run pytest
 ```
 
 Docker:
@@ -307,7 +315,8 @@ Documented so agents do not “rediscover” them as mysteries:
 | `_try_natural_language_command` | Implemented, not called from message flow |
 | `set_prompt` | Updates memory; may not restart chat until `reset_prompt` |
 | Reaction embed description ternary | Always truthy string expression — content always used |
-| `fastapi` in requirements | Not used by current entrypoint |
+| `fastapi` in pyproject | Not used by current entrypoint |
+| Deps | `typesafe-sdk` in `pyproject.toml` / `uv.lock` |
 | Periodic check / infant features | Depend on Infant role + baby-room category existing |
 
 ---
@@ -401,7 +410,7 @@ Do **not** put secrets or other users’ private channel content into `state`.
 | Jev client wrapper | New `src/JevClient.py` (async-friendly: run sync SDK in executor) |
 | Command | Prefer small cog `src/Cogs/Fortune.py` **or** methods on `Gemini` cog — **prefer new cog** to keep chat vs fortune separated |
 | Wire-up | `DiscordBot.setup_hook` → `add_cog(Fortune(...))` |
-| Deps | `typesafe-sdk` in `requirements.txt` |
+| Deps | `typesafe-sdk` in `pyproject.toml` / `uv.lock` |
 | Docs | This section + `!help_command` entry |
 | Secrets | Set on **Koyeb** env after key is ready; never commit |
 

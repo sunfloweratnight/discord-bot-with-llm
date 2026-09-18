@@ -1,1 +1,8 @@
+.git
+.venv
+__pycache__
+.idea
+.env
+*.pyc
+.pytest_cache
 fly.toml

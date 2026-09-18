@@ -1,7 +1,9 @@
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
     DISCORD_API_KEY: str
     OPENAI_API_KEY: str
     GEMINI_API_KEY: str
@@ -23,9 +25,6 @@ class Settings(BaseSettings):
     MINNA_BUNKO_CHANNEL_ID: int
     FREEMEMO_CHANNEL_ID: int
     GUILD_ID: int
-
-    class Config:
-        env_file = ".env"
 
     def get_db_url(self):
         return None
