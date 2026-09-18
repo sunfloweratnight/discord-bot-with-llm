@@ -1,25 +1,19 @@
-"""Unit tests for fortune parsing / formatting (no live Jev/Discord)."""
+"""Unit tests for fortune parsing (domain)."""
 
 from __future__ import annotations
 
-from src.FortuneSchema import (
-    ChoicePick,
-    _mood_bar,
-    _score_label,
+from src.domain.decision.models import ChoiceAnswer, NoulAnswer, ScoreAnswer
+from src.domain.fortune.models import ChoicePick
+from src.domain.fortune.parsing import mood_bar, parse_fortune_answers, score_label
+from src.presentation.discord.formatters.fortune_embed import (
     build_fortune_embed,
     format_fortune_content,
-    parse_fortune_answers,
 )
-
-
-class _Ans:
-    def __init__(self, **kwargs):
-        self.__dict__.update(kwargs)
 
 
 def _sample_answers():
     return {
-        "overall": _Ans(
+        "overall": ChoiceAnswer(
             choice="中吉",
             confidence=0.82,
             probabilities={
@@ -32,11 +26,13 @@ def _sample_answers():
                 "大凶": 0.01,
             },
         ),
-        "love": _Ans(choice="順調", confidence=0.7, probabilities={"順調": 0.61}),
-        "work": _Ans(choice="普通", confidence=0.6, probabilities={"普通": 0.48}),
-        "money": _Ans(choice="注意", confidence=0.5, probabilities={"注意": 0.4}),
-        "health": _Ans(choice="絶好調", confidence=0.4, probabilities={"絶好調": 0.5}),
-        "mood": _Ans(
+        "love": ChoiceAnswer(choice="順調", confidence=0.7, probabilities={"順調": 0.61}),
+        "work": ChoiceAnswer(choice="普通", confidence=0.6, probabilities={"普通": 0.48}),
+        "money": ChoiceAnswer(choice="注意", confidence=0.5, probabilities={"注意": 0.4}),
+        "health": ChoiceAnswer(
+            choice="絶好調", confidence=0.4, probabilities={"絶好調": 0.5}
+        ),
+        "mood": ScoreAnswer(
             score=3.1,
             legend={
                 0: "とても低調で乗らない",
@@ -46,22 +42,25 @@ def _sample_answers():
                 4: "絶好調で勢いがある",
             },
             confidence=0.77,
-            probabilities={},
         ),
-        "caution": _Ans(noul=0.22),
-        "advice": _Ans(
+        "caution": NoulAnswer(noul=0.22),
+        "advice": ChoiceAnswer(
             choice="笑うことを意識",
             confidence=0.6,
             probabilities={"笑うことを意識": 0.44},
         ),
-        "lucky_color": _Ans(
+        "lucky_color": ChoiceAnswer(
             choice="桜ピンク", confidence=0.5, probabilities={"桜ピンク": 0.33}
         ),
-        "lucky_item": _Ans(
+        "lucky_item": ChoiceAnswer(
             choice="ぬいぐるみ", confidence=0.5, probabilities={"ぬいぐるみ": 0.29}
         ),
-        "lucky_food": _Ans(choice="いちご", confidence=0.5, probabilities={"いちご": 0.31}),
-        "lucky_number": _Ans(choice="7", confidence=0.5, probabilities={"7": 0.27}),
+        "lucky_food": ChoiceAnswer(
+            choice="いちご", confidence=0.5, probabilities={"いちご": 0.31}
+        ),
+        "lucky_number": ChoiceAnswer(
+            choice="7", confidence=0.5, probabilities={"7": 0.27}
+        ),
     }
 
 
@@ -78,8 +77,8 @@ def test_parse_fortune_answers_picks_top_overall_and_mood_label():
 
 
 def test_score_label_does_not_dump_legend_dict():
-    label, score, confidence = _score_label(
-        _Ans(
+    label, score, confidence = score_label(
+        ScoreAnswer(
             score=1.2,
             legend={
                 0: "とても低調で乗らない",
@@ -98,9 +97,9 @@ def test_score_label_does_not_dump_legend_dict():
 
 
 def test_mood_bar_fills_hearts():
-    assert _mood_bar(None) == "🤍🤍🤍🤍🤍"
-    assert _mood_bar(3.1).startswith("💖")
-    assert _mood_bar(3.1).count("💖") == 4
+    assert mood_bar(None) == "🤍🤍🤍🤍🤍"
+    assert mood_bar(3.1).startswith("💖")
+    assert mood_bar(3.1).count("💖") == 4
 
 
 def test_format_and_embed_include_probabilities():

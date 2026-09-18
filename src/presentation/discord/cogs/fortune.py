@@ -1,33 +1,32 @@
-"""Fortune-telling cog powered by TypeSafe Jev (PROJECT.md §13)."""
+"""Thin Discord presentation for fortune — no business logic."""
 
 from __future__ import annotations
 
-import discord
 from discord.ext import commands
 
-from Config import settings
 from src.Cogs.Utils import sanitize_args
-from src.FortuneSchema import (
+from src.domain.decision.models import DecisionConfigError, DecisionUnavailableError
+from src.domain.fortune.models import InsufficientHistoryError, TellFortuneCommand
+from src.presentation.discord.formatters.fortune_embed import (
     build_fortune_embed,
-    build_fortune_state,
     format_fortune_content,
-    parse_fortune_answers,
 )
-from src.JevClient import JevClient, JevClientError
+from src.usecases.fortune import TellFortuneUseCase
 
 
 class Fortune(commands.Cog):
     HISTORY_SCAN_LIMIT = 200
     AUTHOR_MESSAGE_LIMIT = 10
 
-    def __init__(self, bot, logger) -> None:
+    def __init__(self, bot, logger, use_case: TellFortuneUseCase, decision_closer) -> None:
         self.bot = bot
         self.logger = logger
-        self.jev = JevClient(settings.TYPESAFE_API_KEY)
+        self._use_case = use_case
+        self._decision_closer = decision_closer
 
     def cog_unload(self):
         try:
-            self.bot.loop.create_task(self.jev.aclose())
+            self.bot.loop.create_task(self._decision_closer.aclose())
         except Exception:
             pass
 
@@ -38,28 +37,29 @@ class Fortune(commands.Cog):
         note = sanitize_args(args)
         async with ctx.typing():
             messages = await self._fetch_author_messages(ctx)
-            if not messages:
+            command = TellFortuneCommand(
+                user_id=ctx.author.id,
+                display_name=ctx.author.display_name,
+                channel_id=ctx.channel.id,
+                channel_name=ctx.channel.name,
+                recent_messages=messages,
+                note=note,
+            )
+            try:
+                result = await self._use_case.execute(command)
+            except InsufficientHistoryError:
                 await ctx.reply(
                     "まだ発言が少なすぎて占えないよ〜 🥺\n"
                     "このチャンネルでもうちょっとしゃべってから "
                     "`!運勢` してね ♡"
                 )
                 return
-
-            state = build_fortune_state(
-                display_name=ctx.author.display_name,
-                user_id=ctx.author.id,
-                channel_name=ctx.channel.name,
-                channel_id=ctx.channel.id,
-                messages=messages,
-                extra=note,
-            )
-
-            try:
-                answers = await self.jev.evaluate_fortune(state)
-                result = parse_fortune_answers(answers)
-            except JevClientError as exc:
-                self.logger.error(f"Fortune JevClientError: {exc}")
+            except DecisionConfigError as exc:
+                self.logger.error(f"Fortune DecisionConfigError: {exc}")
+                await ctx.reply(str(exc))
+                return
+            except DecisionUnavailableError as exc:
+                self.logger.error(f"Fortune DecisionUnavailableError: {exc}")
                 await ctx.reply(str(exc))
                 return
             except Exception as exc:

@@ -2,10 +2,14 @@ import discord
 from discord.ext import commands
 
 from Config import settings
-from src.Cogs.Fortune import Fortune
 from src.Cogs.Gemini import Gemini
 from src.Cogs.RoleOperation import RoleOperation
+from src.infrastructure.gemini import GeminiChatAdapter
+from src.infrastructure.jev import TypesafeJevAdapter
 from src.Logger import Logger
+from src.presentation.discord.cogs.fortune import Fortune
+from src.usecases.chat import ReplyToUserMessage
+from src.usecases.fortune import TellFortuneUseCase
 
 
 class DiscordBot(commands.Bot):
@@ -27,8 +31,22 @@ class DiscordBot(commands.Bot):
     async def setup_hook(self):
         self.logger.info('Setting up the cogs')
         await self.add_cog(RoleOperation(self, self.logger))
-        await self.add_cog(Gemini(self, self.gemini_api_key, self.logger, self.initial_prompt))
-        await self.add_cog(Fortune(self, self.logger))
+
+        chat_adapter = GeminiChatAdapter(self.gemini_api_key, self.initial_prompt)
+        reply_use_case = ReplyToUserMessage(chat_adapter)
+        await self.add_cog(
+            Gemini(
+                self,
+                self.logger,
+                chat_adapter,
+                reply_use_case,
+                self.initial_prompt,
+            )
+        )
+
+        decision = TypesafeJevAdapter(settings.TYPESAFE_API_KEY)
+        fortune_use_case = TellFortuneUseCase(decision)
+        await self.add_cog(Fortune(self, self.logger, fortune_use_case, decision))
         self.logger.info('Cogs are set up')
 
     async def get_started(self):

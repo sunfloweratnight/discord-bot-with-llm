@@ -43,7 +43,7 @@ It is designed for **one guild** (`GUILD_ID`). **Production hosting is on [Koyeb
 |-------|--------|
 | Language | Python 3.11 |
 | Discord | `discord.py` ~= 2.3 (prefix `!` + app/slash commands) |
-| LLM | Google Generative AI — model `gemini-2.0-flash-exp` |
+| LLM | Google Generative AI — model `gemini-2.5-flash` |
 | Config | `pydantic-settings` from `.env` |
 | Keep-alive | Flask on `0.0.0.0:8080` |
 | Hosting | **Koyeb** (primary); Render legacy suspended |
@@ -74,33 +74,59 @@ discord-bot-with-llm/
 ├── .python-version         ← 3.11
 ├── dockerfile
 ├── .env                    ← secrets (not committed)
-├── tests/                  ← pytest (fortune / utils / gemini errors)
-├── src/
-│   ├── DiscordBot.py       ← Bot subclass; loads cogs
-│   ├── Logger.py           ← console logging factory
-│   ├── Session.py          ← async SQLAlchemy session generator
-│   ├── Entities.py         ← ORM models (Message + embedding column)
-│   ├── Models.py           ← Pydantic DTOs (Message / MessagePayload)
-│   ├── Repositories.py     ← generic CRUD repository
-│   ├── Migrate.py          ← create_all table sync (manual)
-│   ├── FortuneSchema.py    ← Jev 運勢 questions + state/result helpers
-│   ├── JevClient.py        ← Async TypeSafe Jev wrapper
-│   └── Cogs/
-│       ├── Gemini.py       ← LLM chat, engagement, Parent tools
-│       ├── Fortune.py      ← `!運勢` / `!fortune`
-│       ├── RoleOperation.py← roles, reactions, slash admin
-│       └── Utils.py        ← argument sanitization
+├── tests/
+│   ├── unit/domain/        ← fortune parse / mood helpers
+│   ├── unit/usecases/      ← FakeDecisionPort / FakeChatPort
+│   └── test_*.py           ← utils / gemini error helpers
+└── src/
+    ├── DiscordBot.py       ← composition root (wire adapters → use cases → cogs)
+    ├── Logger.py
+    ├── Session.py / Entities.py / Models.py / Repositories.py / Migrate.py  ← DB scaffold (disabled)
+    ├── domain/
+    │   ├── decision/       ← DecisionPort + Choice/Score/Noul DTOs (Jev-agnostic)
+    │   ├── fortune/        ← Fortune models, questions, answer parsing
+    │   └── chat/           ← ChatPort + ReplyToUserCommand DTOs
+    ├── usecases/
+    │   ├── fortune.py      ← TellFortuneUseCase(decision: DecisionPort)
+    │   └── chat.py         ← ReplyToUserMessage(chat: ChatPort)
+    ├── infrastructure/
+    │   ├── jev/            ← TypesafeJevAdapter (typesafe_sdk only here)
+    │   └── gemini/         ← GeminiChatAdapter (google.generativeai only here)
+    ├── presentation/discord/
+    │   ├── cogs/fortune.py
+    │   └── formatters/fortune_embed.py
+    └── Cogs/
+        ├── Gemini.py       ← Discord presentation for chat + engagement + Parent tools
+        ├── RoleOperation.py
+        └── Utils.py
 ```
+
+### Layering (Clean Architecture + Hexagonal)
+
+Dependencies point **inward**. `DiscordBot.setup_hook` is the only composition root.
+
+| Layer | May import | Must not import |
+|-------|------------|-----------------|
+| `domain/` | stdlib + own DTOs | `discord`, `typesafe_sdk`, `google.generativeai` |
+| `usecases/` | `domain/` | Discord / vendor SDKs |
+| `infrastructure/` | `domain/` + vendor SDKs | Discord presentation |
+| `presentation/` / `Cogs/` | use cases + formatters | business rules / SDK question builders |
+
+**Decision (Jev) ≠ Fortune.** `DecisionPort` is a generic System One evaluate API (`state` + typed questions → answers). Fortune is one consumer that builds fortune questions and parses answers. Do not name Ports `FortuneJudgePort` / put fortune schema inside the Jev adapter. Gemini chat uses a separate `ChatPort`.
 
 ### Responsibility map
 
 | Module | Owns |
 |--------|------|
 | `main.py` | Process bootstrap; optional `migrate_tables()` (commented out) |
-| `DiscordBot` | Intents, cog registration, token start |
+| `DiscordBot` | Intents, adapter/use-case wiring, cog registration, token start |
 | `RoleOperation` | Join/first-word roles, reaction curation, slash sync/shutdown |
-| `Gemini` | Mentions / `!gem`, chat history context, periodic infant check, Parent utilities |
-| `Fortune` | `!運勢` / `!fortune` via Jev |
+| `Gemini` (presentation) | Mentions / `!gem`, history fetch, infant check UX, Parent utilities |
+| `ReplyToUserMessage` | Prompt assembly + `ChatPort.generate` |
+| `Fortune` (presentation) | `!運勢` history fetch, Embed reply |
+| `TellFortuneUseCase` | Empty-history guard, fortune questions, `DecisionPort.evaluate`, parse |
+| `TypesafeJevAdapter` | Map domain DTOs ↔ `typesafe_sdk` |
+| `GeminiChatAdapter` | Gemini session + retries / API-key mapping |
 | `Config` | Required env vars and channel/guild IDs |
 
 ---
@@ -405,18 +431,20 @@ Do **not** put secrets or other users’ private channel content into `state`.
 
 | Piece | Where |
 |-------|--------|
-| Env | `Config.Settings.TYPESAFE_API_KEY: str` (required once feature ships; or optional with runtime check) |
-| Schema constants | New `src/FortuneSchema.py` (questions factory + embed formatter) |
-| Jev client wrapper | New `src/JevClient.py` (async-friendly: run sync SDK in executor) |
-| Command | Prefer small cog `src/Cogs/Fortune.py` **or** methods on `Gemini` cog — **prefer new cog** to keep chat vs fortune separated |
-| Wire-up | `DiscordBot.setup_hook` → `add_cog(Fortune(...))` |
+| Env | `Config.Settings.TYPESAFE_API_KEY` (optional at boot; runtime check) |
+| Decision DTOs / Port | `src/domain/decision/` |
+| Fortune models / questions / parse | `src/domain/fortune/` |
+| Use case | `src/usecases/fortune.py` (`TellFortuneUseCase`) |
+| Jev adapter | `src/infrastructure/jev/` (`TypesafeJevAdapter` + SDK mapping) |
+| Discord Cog + Embed | `src/presentation/discord/cogs/fortune.py`, `formatters/fortune_embed.py` |
+| Wire-up | `DiscordBot.setup_hook` → adapter → use case → cog |
 | Deps | `typesafe-sdk` in `pyproject.toml` / `uv.lock` |
 | Docs | This section + `!help_command` entry |
 | Secrets | Set on **Koyeb** env after key is ready; never commit |
 
 ### 13.6 Implementation status
 
-Shipped modules: `src/FortuneSchema.py`, `src/JevClient.py`, `src/Cogs/Fortune.py` (registered in `DiscordBot.setup_hook`). Dependency: `typesafe-sdk`.
+Shipped as a Clean/Hexagonal slice: domain + use case + `TypesafeJevAdapter` + presentation Fortune cog. Old `FortuneSchema.py` / `JevClient.py` / `Cogs/Fortune.py` removed.
 
 ### 13.7 Non-goals (v1)
 

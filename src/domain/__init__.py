@@ -1,0 +1,1 @@
+"""Fortune domain package."""

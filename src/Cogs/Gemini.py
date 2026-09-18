@@ -1,6 +1,5 @@
 from datetime import timezone
 import discord
-import google.generativeai as genai
 from discord.ext import commands
 import asyncio
 from discord.ext import tasks
@@ -11,50 +10,51 @@ import re
 
 from src import Entities, Session
 from src.Cogs.Utils import sanitize_args
+from src.domain.chat.models import (
+    ChatConfigError,
+    ChatMessage,
+    ChatUnavailableError,
+    ReplyToUserCommand,
+)
+from src.infrastructure.gemini import GeminiChatAdapter
 from src.Models import MessagePayload
 from src.Repositories import DatabaseRepository
+from src.usecases.chat import ReplyToUserMessage
+
 
 class Gemini(commands.Cog):
-    SAFETY_SETTINGS = [
-        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-    ]
     MESSAGE_HISTORY_LIMIT = 50  # Default message history limit
 
-    def __init__(self, bot, api_key, logger, initial_prompt):
+    def __init__(
+        self,
+        bot,
+        logger,
+        chat_adapter: GeminiChatAdapter,
+        reply_use_case: ReplyToUserMessage,
+        initial_prompt: str,
+    ):
         self.bot = bot
         self.logger = logger
-        self.initial_prompt = [
-            {"role": "user", "parts": [initial_prompt]}
-        ]
-        self.default_initial_prompt = initial_prompt  # デフォルトのプロンプトを保存
-        self.BABY_ROOM_CATEGORY_ID = 1150088658947407952  # 赤ちゃん部屋のカテゴリーID
-
-        genai.configure(api_key=api_key)
-        generation_config = {
-            "temperature": 1,
-            "top_p": 0.95,
-            "top_k": 40,
-            "max_output_tokens": 8192,
-        }
-        
-        self.model = genai.GenerativeModel(
-            model_name="gemini-2.0-flash-exp",  # Updated to use stable release model
-            generation_config=generation_config,
-            safety_settings=self.SAFETY_SETTINGS  # Added safety settings
-        )
-
-        self.chat = self.model.start_chat(history=self.initial_prompt)
+        self._chat = chat_adapter
+        self._reply = reply_use_case
+        self.initial_prompt = [{"role": "user", "parts": [initial_prompt]}]
+        self.default_initial_prompt = initial_prompt
+        self.BABY_ROOM_CATEGORY_ID = 1150088658947407952
         self.last_check_channel = None
-        # 定期チェックはデフォルトでは開始しない
         self.periodic_infant_check.stop()
 
     def cog_unload(self):
         """Cogがアンロードされるときにタスクを停止"""
         if self.periodic_infant_check.is_running():
             self.periodic_infant_check.cancel()
+
+    @staticmethod
+    def _is_api_key_error(error: Exception) -> bool:
+        return GeminiChatAdapter.is_api_key_error(error)
+
+    @staticmethod
+    def _api_key_user_message() -> str:
+        return GeminiChatAdapter.api_key_user_message()
 
     @tasks.loop(minutes=30)  # 30分ごとに実行
     async def periodic_infant_check(self):
@@ -189,126 +189,71 @@ class Gemini(commands.Cog):
         await ctx.reply(f'メッセージ履歴の制限を{limit}件に設定しました。')
 
     async def process_message(self, arguments, reply_func, author_name):
-        if not arguments and not hasattr(reply_func, 'message'):
-            await reply_func.reply('どしたん?話きこか?')
+        if not arguments and not hasattr(reply_func, "message"):
+            await reply_func.reply("どしたん?話きこか?")
             return
 
-        # Fetch messages from the channel using the configurable limit
-        channel = reply_func.channel if hasattr(reply_func, 'channel') else reply_func.message.channel
-        messages = []
+        channel = reply_func.channel if hasattr(reply_func, "channel") else reply_func.message.channel
+        history: List[ChatMessage] = []
         async for msg in channel.history(limit=self.MESSAGE_HISTORY_LIMIT):
-            if msg.author != self.bot.user:  # Only include user messages
-                messages.append(f"{msg.author.display_name}: {msg.content}")
-        
-        # Reverse messages to show oldest first
-        messages.reverse()
-        
-        # Create context with previous messages
-        context = "Previous messages:\n" + "\n".join(messages) + "\n\nCurrent message:\n"
-        
+            if msg.author != self.bot.user:
+                history.append(
+                    ChatMessage(author_name=msg.author.display_name, content=msg.content)
+                )
+        history.reverse()
+
         try:
-            response = await self.send_chat_message(f"{context}{author_name}: {arguments}")
-            response_text = response.text if hasattr(response, 'text') else str(response)
-            
-            # Split long messages
+            reply = await self._reply.execute(
+                ReplyToUserCommand(
+                    author_name=author_name,
+                    user_text=arguments or "",
+                    history=history,
+                )
+            )
+            response_text = reply.text
+
             if len(response_text) > 2000:
-                chunks = [response_text[i:i+1990] for i in range(0, len(response_text), 1990)]
+                chunks = [response_text[i : i + 1990] for i in range(0, len(response_text), 1990)]
                 for chunk in chunks:
                     try:
                         await reply_func.reply(chunk)
                     except discord.errors.HTTPException as e:
-                        # メッセージが見つからない場合は通常のメッセージとして送信
                         if e.code == 50035 and "Unknown message" in str(e):
                             await channel.send(f"**{author_name}へ返信:** {chunk}")
                         else:
-                            # その他のHTTPエラーは再スロー
                             raise
             else:
                 try:
                     await reply_func.reply(response_text)
                 except discord.errors.HTTPException as e:
-                    # メッセージが見つからない場合は通常のメッセージとして送信
                     if e.code == 50035 and "Unknown message" in str(e):
                         await channel.send(f"**{author_name}へ返信:** {response_text}")
                     else:
-                        # その他のHTTPエラーは再スロー
                         raise
-                        
+
+        except (ChatConfigError, ChatUnavailableError) as e:
+            self.logger.error(f"Error in process_message: {e}")
+            try:
+                await reply_func.reply(str(e))
+            except discord.errors.HTTPException:
+                await channel.send(str(e))
         except Exception as e:
             self.logger.error(f"Error in process_message: {e}")
             try:
                 await reply_func.reply("申し訳ありません。メッセージの処理中にエラーが発生しました。")
             except discord.errors.HTTPException:
-                # 返信できない場合は通常のメッセージとして送信
                 await channel.send("申し訳ありません。メッセージの処理中にエラーが発生しました。")
 
-    @staticmethod
-    def _is_api_key_error(error: Exception) -> bool:
-        text = str(error).lower()
-        markers = (
-            "api_key_invalid",
-            "api key not valid",
-            "invalid api key",
-            "api key expired",
-        )
-        return any(marker in text for marker in markers)
-
-    @staticmethod
-    def _api_key_user_message() -> str:
-        return (
-            "GeminiのAPIキーが無効か期限切れのようです。"
-            "デプロイ先（Koyeb）の環境変数 `GEMINI_API_KEY` を有効なキーに更新して、"
-            "サービスを再デプロイしてください。"
-        )
-
-    def _user_facing_gemini_error(self, error: Exception, *, exhausted_retries: bool = False) -> str:
-        if self._is_api_key_error(error):
-            return self._api_key_user_message()
-        if exhausted_retries:
-            return (
-                "申し訳ありません。AIへの接続に何度か失敗しました。"
-                "しばらく待ってからもう一度試してください。"
-            )
-        return "申し訳ありません。応答の生成中にエラーが発生しました。"
-
-    async def send_chat_message(self, msg):
-        """Asynchronously send a message to the chat with retry logic"""
-        max_attempts = 3
-        for attempt in range(1, max_attempts + 1):
-            try:
-                # Wrap the synchronous API call in an executor to make it async
-                response = await asyncio.get_event_loop().run_in_executor(
-                    None, self.chat.send_message, msg
-                )
-                return response
-            except asyncio.TimeoutError:
-                if attempt == max_attempts:
-                    return (
-                        "申し訳ありません。AIの応答が時間内に返りませんでした。"
-                        "しばらく待ってからもう一度試してください。"
-                    )
-                await asyncio.sleep(1)  # Add delay between retries
-            except Exception as e:
-                self.logger.error(f"Error in send_chat_message (attempt {attempt}): {str(e)}")
-                # Invalid credentials will not succeed on retry
-                if self._is_api_key_error(e) or attempt == max_attempts:
-                    return self._user_facing_gemini_error(
-                        e, exhausted_retries=(attempt == max_attempts)
-                    )
-                await asyncio.sleep(1)
-
     async def _generate_response(self, prompt: str) -> str:
-        """Generate a response using the chat model"""
+        """Generate a one-off response (does not mutate the main chat session)."""
         try:
-            # Create a new chat for one-off responses
-            temp_chat = self.model.start_chat()
-            response = await asyncio.get_event_loop().run_in_executor(
-                None, temp_chat.send_message, prompt
-            )
-            return response.text if hasattr(response, 'text') else str(response)
+            return await self._chat.generate_ephemeral(prompt)
+        except (ChatConfigError, ChatUnavailableError) as e:
+            self.logger.error(f"Error in _generate_response: {e}")
+            return str(e)
         except Exception as e:
-            self.logger.error(f"Error in _generate_response: {str(e)}")
-            return self._user_facing_gemini_error(e)
+            self.logger.error(f"Error in _generate_response: {e}")
+            return "申し訳ありません。応答の生成中にエラーが発生しました。"
 
     @commands.command()
     @commands.has_role("Parent")
@@ -692,7 +637,7 @@ class Gemini(commands.Cog):
                     await ctx.reply("このコマンドを実行する権限がありません。")
                     return
 
-            current_prompt = self.initial_prompt[0]["parts"][0]
+            current_prompt = self._chat.current_prompt
             await ctx.reply(f"📝 **現在のinitial prompt**:\n```\n{current_prompt}\n```")
         except Exception as e:
             self.logger.error(f"Error in show_prompt: {e}")
@@ -708,7 +653,12 @@ class Gemini(commands.Cog):
                     await ctx.reply("このコマンドを実行する権限がありません。")
                     return
 
+            self._chat.set_prompt(new_prompt)
             self.initial_prompt = [{"role": "user", "parts": [new_prompt]}]
+            await ctx.reply(
+                "✅ initial promptを更新し、チャットを初期化しました。\n"
+                "現在のプロンプトの内容を確認するには `!show_prompt` を使用してください。"
+            )
         except Exception as e:
             self.logger.error(f"Error in set_prompt: {e}")
             await ctx.reply("initial promptの更新中にエラーが発生しました。")
@@ -723,15 +673,15 @@ class Gemini(commands.Cog):
                     await ctx.reply("このコマンドを実行する権限がありません。")
                     return
 
+            self._chat.reset_prompt()
             self.initial_prompt = [{"role": "user", "parts": [self.default_initial_prompt]}]
-            # デフォルトのプロンプトでチャットを初期化
-            self.chat = self.model.start_chat(history=self.initial_prompt)
-            await ctx.reply("✅ initial promptをデフォルトの内容に戻し、チャットを初期化しました。\n"
-                          "現在のプロンプトの内容を確認するには `!show_prompt` を使用してください。")
+            await ctx.reply(
+                "✅ initial promptをデフォルトの内容に戻し、チャットを初期化しました。\n"
+                "現在のプロンプトの内容を確認するには `!show_prompt` を使用してください。"
+            )
         except Exception as e:
             self.logger.error(f"Error in reset_prompt: {e}")
             await ctx.reply("initial promptのリセット中にエラーが発生しました。")
-
     async def _try_natural_language_command(self, text: str, ctx) -> bool:
         """自然言語コマンドを処理する"""
         # サーバーでの実行時のみ権限チェックを行う

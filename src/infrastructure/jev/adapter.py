@@ -1,19 +1,19 @@
-"""Thin async wrapper around TypeSafe Jev (System One)."""
+"""Typesafe Jev adapter implementing DecisionPort."""
 
 from __future__ import annotations
 
-from typing import Any, Mapping
-
 from typesafe_sdk import AsyncTypeSafeClient
 
-from src.FortuneSchema import build_fortune_questions
+from src.domain.decision.models import (
+    DecisionConfigError,
+    DecisionRequest,
+    DecisionResponse,
+    DecisionUnavailableError,
+)
+from src.infrastructure.jev.mapping import from_sdk_answers, to_sdk_questions
 
 
-class JevClientError(Exception):
-    """User-safe failure talking to Jev."""
-
-
-class JevClient:
+class TypesafeJevAdapter:
     def __init__(self, api_key: str, *, model: str = "jev-latest") -> None:
         self._api_key = (api_key or "").strip()
         self._model = model
@@ -25,22 +25,22 @@ class JevClient:
 
     def _get_client(self) -> AsyncTypeSafeClient:
         if not self.configured:
-            raise JevClientError(
+            raise DecisionConfigError(
                 "運勢APIのキーが未設定か無効です。Koyebの環境変数 `TYPESAFE_API_KEY` を確認してください。"
             )
         if self._client is None:
             self._client = AsyncTypeSafeClient(api_key=self._api_key, model=self._model)
         return self._client
 
-    async def evaluate_fortune(self, state: Mapping[str, Any] | str) -> Mapping[str, Any]:
+    async def evaluate(self, request: DecisionRequest) -> DecisionResponse:
         client = self._get_client()
         try:
             response = await client.system_one(
-                state=state,
-                questions=build_fortune_questions(),
+                state=request.state,
+                questions=to_sdk_questions(request.questions),
                 model=self._model,
             )
-        except JevClientError:
+        except DecisionConfigError:
             raise
         except Exception as exc:
             text = str(exc).lower()
@@ -55,13 +55,13 @@ class JevClient:
                     "no api key",
                 )
             ):
-                raise JevClientError(
+                raise DecisionConfigError(
                     "運勢APIのキーが未設定か無効です。Koyebの環境変数 `TYPESAFE_API_KEY` を確認してください。"
                 ) from exc
-            raise JevClientError(
+            raise DecisionUnavailableError(
                 "占いに失敗しました。しばらくしてからもう一度試してください。"
             ) from exc
-        return response.answers
+        return DecisionResponse(answers=from_sdk_answers(response.answers))
 
     async def aclose(self) -> None:
         if self._client is not None:
