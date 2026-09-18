@@ -9,6 +9,7 @@ from typesafe_sdk import Choice, Noul, Score
 
 OVERALL_LEVELS = ("大吉", "中吉", "小吉", "吉", "末吉", "凶", "大凶")
 AXIS_LEVELS = ("絶好調", "順調", "普通", "注意", "低調")
+
 ADVICE_OPTIONS = {
     "深呼吸してから動く": "焦らず一度止まってから行動する",
     "連絡を大切に": "気になる相手や仲間への一言を優先する",
@@ -20,11 +21,103 @@ ADVICE_OPTIONS = {
     "水を多めに": "水分と休憩を意識してペースを保つ",
 }
 
+LUCKY_COLORS = {
+    "桜ピンク": "やさしくてときめく色",
+    "ラベンダー": "ふわっと落ち着く色",
+    "水色": "すっきりクリアな色",
+    "ミントグリーン": "さっぱり癒やされる色",
+    "クリームイエロー": "ぽかぽか明るい色",
+    "コーラルオレンジ": "元気が出るあたたかい色",
+    "パールホワイト": "きれいめで澄んだ色",
+    "ベビーブルー": "やさしい空みたいな色",
+    "ももいろ": "あまあまでかわいい色",
+    "うすむらさき": "ちょっと神秘的な色",
+}
+
+LUCKY_ITEMS = {
+    "ぬいぐるみ": "ぎゅっと安心できる相棒",
+    "イヤホン": "自分ワールドへの入り口",
+    "ふせんメモ": "きらめく小さなアイデア帳",
+    "リボン・シュシュ": "今日の気分を上げるワンポイント",
+    "マグカップ": "ほっと一息の味方",
+    "キーホルダー": "お出かけのお守り",
+    "ハンカチ": "きちんとかわいい持ち物",
+    "シール・ステッカー": "毎日にきらめきを足す道具",
+    "香水・ボディミスト": "気分転換の魔法スプレー",
+    "お菓子": "ごほうびタイムの種",
+}
+
+LUCKY_FOODS = {
+    "いちご": "あまくてハッピー",
+    "ぷるんゼリー": "ひんやりごほうび",
+    "マカロン": "かわいい一口幸せ",
+    "ホットココア": "ぽかぽかおやすみ前",
+    "フルーツティー": "軽やかリセット",
+    "ヨーグルト": "すっきりチャージ",
+    "チョコレート": "どきっと甘やかし",
+    "おにぎり": "じぶん応援ごはん",
+    "パンケーキ": "ふんわり朝ごほうび",
+    "グミ": "ぽいっとご機嫌",
+}
+
+LUCKY_NUMBERS = {
+    "1": "はじまりの数字",
+    "2": "なかよしの数字",
+    "3": "きらめきの数字",
+    "4": "じっくりの数字",
+    "5": "のびのびの数字",
+    "6": "まるくおさまる数字",
+    "7": "ちょっぴり魔法の数字",
+    "8": "ぱわーあっぷの数字",
+    "9": "みのりある数字",
+}
+
 AXIS_INSTRUCTION = (
     "Infer from the author's recent Discord messages in state. "
     "Pick the level that best matches today's likely trend for this person. "
     "Prefer evidence in their words and tone over generic calendar astrology."
 )
+
+OVERALL_EMOJI = {
+    "大吉": "✨🌈",
+    "中吉": "🌸💫",
+    "小吉": "🍀🙂",
+    "吉": "☀️🌿",
+    "末吉": "🫧🌿",
+    "凶": "☁️💭",
+    "大凶": "🌧️🫂",
+}
+
+AXIS_EMOJI = {
+    "絶好調": "💖",
+    "順調": "🌷",
+    "普通": "🙂",
+    "注意": "⚠️",
+    "低調": "💤",
+}
+
+COLOR_EMOJI = {
+    "桜ピンク": "🩷",
+    "ラベンダー": "💜",
+    "水色": "🩵",
+    "ミントグリーン": "💚",
+    "クリームイエロー": "💛",
+    "コーラルオレンジ": "🧡",
+    "パールホワイト": "🤍",
+    "ベビーブルー": "💙",
+    "ももいろ": "💗",
+    "うすむらさき": "💟",
+}
+
+OVERALL_EMBED_COLOR = {
+    "大吉": 0xFF8EC8,
+    "中吉": 0xC9A0FF,
+    "小吉": 0x7DD3FC,
+    "吉": 0x86EFAC,
+    "末吉": 0xFDE68A,
+    "凶": 0xA5B4FC,
+    "大凶": 0x94A3B8,
+}
 
 
 def build_fortune_questions() -> dict[str, Choice | Score | Noul]:
@@ -75,6 +168,24 @@ def build_fortune_questions() -> dict[str, Choice | Score | Noul]:
             ),
             criteria=ADVICE_OPTIONS,
         ),
+        "lucky_color": Choice(
+            instructions=(
+                "発言の雰囲気に合う、今日のラッキーカラーをかわいく選ぶ。"
+            ),
+            criteria=LUCKY_COLORS,
+        ),
+        "lucky_item": Choice(
+            instructions="今日持ち歩くとよさそうな、かわいいラッキーアイテムを1つ選ぶ。",
+            criteria=LUCKY_ITEMS,
+        ),
+        "lucky_food": Choice(
+            instructions="今日のごほうび・ラッキーフードを1つ選ぶ。",
+            criteria=LUCKY_FOODS,
+        ),
+        "lucky_number": Choice(
+            instructions="今日のラッキーナンバー（1桁）を1つ選ぶ。",
+            criteria=LUCKY_NUMBERS,
+        ),
     }
 
 
@@ -95,7 +206,7 @@ def build_fortune_state(
         "channel_id": str(channel_id),
         "recent_messages": numbered,
         "message_count": len(messages),
-        "task": "今日の運勢を、この人の直近の発言から判断する",
+        "task": "今日の運勢を、この人の直近の発言からかわいく判断する",
     }
     if extra:
         state["command_note"] = extra
@@ -115,6 +226,10 @@ class FortuneResult:
     mood_score: float | None
     caution: float
     advice: str
+    lucky_color: str
+    lucky_item: str
+    lucky_food: str
+    lucky_number: str
 
 
 def _choice_pick(answer: Any) -> tuple[str, float | None, float | None]:
@@ -138,13 +253,10 @@ def _score_label(answer: Any) -> tuple[str, float | None]:
         return str(legend), float(score) if score is not None else None
     if score is None:
         return "不明", None
-    # Score may be continuous; map roughly onto 1–5 display
     try:
         value = float(score)
     except (TypeError, ValueError):
         return str(score), None
-    clamped = max(1, min(5, int(round(value + 1)) if value < 1.5 else int(round(value))))
-    # Prefer showing raw score with simple star hint
     stars = "★" * max(1, min(5, int(round(value)) if value >= 1 else 1))
     return f"{stars} ({value:.2f})", value
 
@@ -162,6 +274,10 @@ def parse_fortune_answers(answers: Mapping[str, Any]) -> FortuneResult:
     except (TypeError, ValueError):
         caution = 0.0
     advice, _, _ = _choice_pick(answers["advice"])
+    lucky_color, _, _ = _choice_pick(answers["lucky_color"])
+    lucky_item, _, _ = _choice_pick(answers["lucky_item"])
+    lucky_food, _, _ = _choice_pick(answers["lucky_food"])
+    lucky_number, _, _ = _choice_pick(answers["lucky_number"])
     return FortuneResult(
         overall=overall,
         overall_confidence=overall_conf,
@@ -174,4 +290,110 @@ def parse_fortune_answers(answers: Mapping[str, Any]) -> FortuneResult:
         mood_score=mood_score,
         caution=caution,
         advice=advice,
+        lucky_color=lucky_color,
+        lucky_item=lucky_item,
+        lucky_food=lucky_food,
+        lucky_number=lucky_number,
     )
+
+
+def _axis_line(level: str) -> str:
+    emoji = AXIS_EMOJI.get(level, "✨")
+    return f"{emoji} **{level}**"
+
+
+def _mood_bar(mood_score: float | None) -> str:
+    if mood_score is None:
+        return "□□□□□"
+    # Score may be 0-indexed continuous or 1-5; normalize roughly to 1..5
+    value = float(mood_score)
+    if value < 1:
+        value = value + 1
+    filled = max(0, min(5, int(round(value))))
+    return "💖" * filled + "🤍" * (5 - filled)
+
+
+def format_fortune_content(display_name: str, result: FortuneResult) -> str:
+    sparkle = OVERALL_EMOJI.get(result.overall, "✨")
+    return (
+        f"˚₊·—̳͟͞͞♡ **{display_name}** さんの今日の運勢チェック完了〜！\n"
+        f"{sparkle} 総合は **`{result.overall}`** だよ"
+    )
+
+
+def build_fortune_embed(display_name: str, result: FortuneResult) -> "object":
+    """Build a cute Discord embed. Imported discord only at call sites if needed."""
+    import discord
+
+    color = OVERALL_EMBED_COLOR.get(result.overall, 0xFFB7C5)
+    overall_emoji = OVERALL_EMOJI.get(result.overall, "✨")
+    color_emoji = COLOR_EMOJI.get(result.lucky_color, "🎨")
+    color_blurb = LUCKY_COLORS.get(result.lucky_color, "きらめく色")
+    item_blurb = LUCKY_ITEMS.get(result.lucky_item, "おたからアイテム")
+    food_blurb = LUCKY_FOODS.get(result.lucky_food, "ごほうび")
+    number_blurb = LUCKY_NUMBERS.get(result.lucky_number, "きせきの数字")
+    advice_blurb = ADVICE_OPTIONS.get(result.advice, "今日をやさしく過ごそう")
+
+    lines = [
+        f"{overall_emoji} **総合運** › **`{result.overall}`** {overall_emoji}",
+        "",
+        "୨୧┈┈┈┈┈┈┈┈┈┈┈┈┈┈୨୧",
+    ]
+    if result.caution >= 0.6:
+        lines.extend(
+            [
+                f"🫧 *今日はそっと慎重モード* （{result.caution:.0%}）",
+                "　無理しないのがいちばんかわいいよ〜",
+                "୨୧┈┈┈┈┈┈┈┈┈┈┈┈┈┈୨୧",
+            ]
+        )
+
+    embed = discord.Embed(
+        title=f"♡ {display_name} さんの今日の運勢 ♡",
+        description="\n".join(lines),
+        color=color,
+    )
+
+    embed.add_field(name="💕 恋愛・対人", value=_axis_line(result.love), inline=True)
+    embed.add_field(name="📚 仕事・勉強", value=_axis_line(result.work), inline=True)
+    embed.add_field(name="🪙 金運", value=_axis_line(result.money), inline=True)
+    embed.add_field(name="🌿 健康", value=_axis_line(result.health), inline=True)
+    embed.add_field(
+        name="🎀 気分ゲージ",
+        value=f"{_mood_bar(result.mood_score)}\n*{result.mood_label}*",
+        inline=True,
+    )
+    embed.add_field(
+        name="🔢 ラッキーナンバー",
+        value=f"**`{result.lucky_number}`**\n*{number_blurb}*",
+        inline=True,
+    )
+
+    embed.add_field(
+        name=f"{color_emoji} ラッキーカラー",
+        value=f"**{result.lucky_color}**\n*{color_blurb}*",
+        inline=True,
+    )
+    embed.add_field(
+        name="🧸 ラッキーアイテム",
+        value=f"**{result.lucky_item}**\n*{item_blurb}*",
+        inline=True,
+    )
+    embed.add_field(
+        name="🍬 ラッキーフード",
+        value=f"**{result.lucky_food}**\n*{food_blurb}*",
+        inline=True,
+    )
+    embed.add_field(
+        name="💌 今日のひとこと",
+        value=f"**{result.advice}**\n> {advice_blurb}",
+        inline=False,
+    )
+
+    footer_parts = ["˚₊‧꒰ა 占い完了 ໒꒱ ‧₊"]
+    if result.overall_probability is not None:
+        footer_parts.append(f"きらめき度 {result.overall_probability:.0%}")
+    if result.overall_confidence is not None:
+        footer_parts.append(f"自信 {result.overall_confidence:.0%}")
+    embed.set_footer(text=" · ".join(footer_parts))
+    return embed

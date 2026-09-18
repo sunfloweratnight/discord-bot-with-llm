@@ -359,9 +359,13 @@ Single request, shared `state`, parallel questions:
 | `health` | Choice | same as love |
 | `mood` | Score | 1–5（今日の気分の乗りやすさ） |
 | `caution` | Noul | 「今日は慎重に動いた方がよいか」 |
-| `advice` | Choice | Fixed Japanese advice idioms (≤8 options), e.g. 深呼吸してから動く / 連絡を大切に / 新しいことに触れる / 休息を優先 / 小さな整理をする / 笑うことを意識 / 早寝を心がける / 水を多めに |
+| `advice` | Choice | Fixed cute Japanese advice idioms |
+| `lucky_color` | Choice | 桜ピンク / ラベンダー / 水色 / … |
+| `lucky_item` | Choice | ぬいぐるみ / イヤホン / … |
+| `lucky_food` | Choice | いちご / マカロン / … |
+| `lucky_number` | Choice | `1`–`9` |
 
-Instructions (per question) should tell Jev to infer from the author’s recent messages in `state`, not from calendar astrology alone.
+Reply UX: cute Discord markdown + embed (axis emoji, mood hearts, lucky block, author thumbnail).
 
 ### 13.3 `state` payload shape
 
