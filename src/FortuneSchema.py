@@ -72,6 +72,14 @@ LUCKY_NUMBERS = {
     "9": "みのりある数字",
 }
 
+MOOD_LEVELS = (
+    "とても低調で乗らない",
+    "やや低調",
+    "ふつう",
+    "前向きで乗りやすい",
+    "絶好調で勢いがある",
+)
+
 AXIS_INSTRUCTION = (
     "Infer from the author's recent Discord messages in state. "
     "Pick the level that best matches today's likely trend for this person. "
@@ -151,13 +159,7 @@ def build_fortune_questions() -> dict[str, Choice | Score | Noul]:
                 "今日の気分の乗りやすさ。1が低調、5が最高潮。"
                 "発言のトーンから段階評価する。"
             ),
-            criteria=[
-                "とても低調で乗らない",
-                "やや低調",
-                "ふつう",
-                "前向きで乗りやすい",
-                "絶好調で勢いがある",
-            ],
+            criteria=list(MOOD_LEVELS),
         ),
         "caution": Noul(
             instructions="今日は慎重に動いた方がよいか（Yes=慎重が望ましい）",
@@ -246,19 +248,76 @@ def _choice_pick(answer: Any) -> tuple[str, float | None, float | None]:
     return str(choice), conf, prob
 
 
-def _score_label(answer: Any) -> tuple[str, float | None]:
-    score = getattr(answer, "score", None)
-    legend = getattr(answer, "legend", None)
-    if legend:
-        return str(legend), float(score) if score is not None else None
+def _legend_to_label(legend: Any, score: float | None) -> str | None:
+    """Pick a single human label from Jev Score legend (str or index→label map)."""
+    if legend is None:
+        return None
+    if isinstance(legend, str):
+        text = legend.strip()
+        return text or None
+    if isinstance(legend, Mapping):
+        if score is not None:
+            # Prefer nearest index key: 0..n-1 or 1..n
+            idx = int(round(float(score)))
+            for key in (idx, idx - 1, str(idx), str(idx - 1)):
+                if key in legend:
+                    return str(legend[key])
+            # Highest-probability key if values look like probs? Otherwise first by sorted index
+            try:
+                numeric_items = sorted(
+                    ((int(k), v) for k, v in legend.items()),
+                    key=lambda kv: kv[0],
+                )
+                if numeric_items and score is not None:
+                    # clamp into range
+                    lo = numeric_items[0][0]
+                    hi = numeric_items[-1][0]
+                    clamped = max(lo, min(hi, idx if idx <= hi else idx - 1))
+                    for k, v in numeric_items:
+                        if k == clamped:
+                            return str(v)
+                if numeric_items:
+                    mid = numeric_items[len(numeric_items) // 2][1]
+                    return str(mid)
+            except (TypeError, ValueError):
+                pass
+            # fallback: any value
+            first = next(iter(legend.values()), None)
+            return str(first) if first is not None else None
+        first = next(iter(legend.values()), None)
+        return str(first) if first is not None else None
+    return None
+
+
+def _mood_label_from_score(score: float | None) -> str:
     if score is None:
-        return "不明", None
+        return "ふつう"
+    value = float(score)
+    # Jev Score is often 0-indexed across criteria length
+    if 0 <= value < len(MOOD_LEVELS):
+        idx = int(round(value))
+    else:
+        # 1..5 style
+        idx = int(round(value)) - 1
+    idx = max(0, min(len(MOOD_LEVELS) - 1, idx))
+    return MOOD_LEVELS[idx]
+
+
+def _score_label(answer: Any) -> tuple[str, float | None]:
+    score_raw = getattr(answer, "score", None)
+    legend = getattr(answer, "legend", None)
     try:
-        value = float(score)
+        score = float(score_raw) if score_raw is not None else None
     except (TypeError, ValueError):
-        return str(score), None
-    stars = "★" * max(1, min(5, int(round(value)) if value >= 1 else 1))
-    return f"{stars} ({value:.2f})", value
+        score = None
+
+    label = _legend_to_label(legend, score)
+    # Never show raw dict / mapping dumps in Discord
+    if label and label.startswith("{") and ":" in label:
+        label = None
+    if not label:
+        label = _mood_label_from_score(score)
+    return label, score
 
 
 def parse_fortune_answers(answers: Mapping[str, Any]) -> FortuneResult:
@@ -304,12 +363,14 @@ def _axis_line(level: str) -> str:
 
 def _mood_bar(mood_score: float | None) -> str:
     if mood_score is None:
-        return "□□□□□"
-    # Score may be 0-indexed continuous or 1-5; normalize roughly to 1..5
+        return "🤍🤍🤍🤍🤍"
     value = float(mood_score)
-    if value < 1:
-        value = value + 1
-    filled = max(0, min(5, int(round(value))))
+    # Normalize 0..4 or 1..5 into filled hearts 1..5
+    if 0 <= value < len(MOOD_LEVELS):
+        filled = int(round(value)) + 1
+    else:
+        filled = int(round(value))
+    filled = max(1, min(5, filled))
     return "💖" * filled + "🤍" * (5 - filled)
 
 
