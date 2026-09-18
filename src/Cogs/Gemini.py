@@ -659,7 +659,7 @@ class Gemini(commands.Cog):
                 if is_parent:
                     available_commands.append((cmd_name, cmd_desc))
             # Parent/Toddler共用コマンド
-            elif cmd_name in ["gem", "運勢", "save_message", "get_messages", "set_history_limit"]:
+            elif cmd_name in ["gem", "save_message", "get_messages", "set_history_limit"]:
                 if is_parent or is_toddler:
                     available_commands.append((cmd_name, cmd_desc))
             # 誰でも使えるコマンド
