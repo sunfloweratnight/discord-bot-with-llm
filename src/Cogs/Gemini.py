@@ -232,13 +232,14 @@ class Gemini(commands.Cog):
                         raise
 
         except (ChatConfigError, ChatUnavailableError) as e:
-            self.logger.error(f"Error in process_message: {e}")
+            cause = e.__cause__ or e
+            self.logger.error(f"Error in process_message: {e} | upstream={cause!r}")
             try:
                 await reply_func.reply(str(e))
             except discord.errors.HTTPException:
                 await channel.send(str(e))
         except Exception as e:
-            self.logger.error(f"Error in process_message: {e}")
+            self.logger.error(f"Error in process_message: {e}", exc_info=True)
             try:
                 await reply_func.reply("申し訳ありません。メッセージの処理中にエラーが発生しました。")
             except discord.errors.HTTPException:

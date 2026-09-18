@@ -7,6 +7,8 @@ class Settings(BaseSettings):
     DISCORD_API_KEY: str
     OPENAI_API_KEY: str
     GEMINI_API_KEY: str
+    # Overridable so Koyeb can switch models without a code change.
+    GEMINI_MODEL: str = "gemini-3.5-flash"
     INITIAL_PROMPT: str
     # TypeSafe Jev (運勢). Optional so the bot can boot without it; Fortune cog checks at runtime.
     TYPESAFE_API_KEY: str = ""

@@ -32,7 +32,12 @@ class DiscordBot(commands.Bot):
         self.logger.info('Setting up the cogs')
         await self.add_cog(RoleOperation(self, self.logger))
 
-        chat_adapter = GeminiChatAdapter(self.gemini_api_key, self.initial_prompt)
+        chat_adapter = GeminiChatAdapter(
+            self.gemini_api_key,
+            self.initial_prompt,
+            model_name=settings.GEMINI_MODEL,
+        )
+        self.logger.info(f'Gemini model: {chat_adapter.model_name}')
         reply_use_case = ReplyToUserMessage(chat_adapter)
         await self.add_cog(
             Gemini(

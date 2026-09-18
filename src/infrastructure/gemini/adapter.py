@@ -22,9 +22,10 @@ class GeminiChatAdapter:
         api_key: str,
         initial_prompt: str,
         *,
-        model_name: str = "gemini-2.5-flash",
+        model_name: str = "gemini-3.5-flash",
     ) -> None:
         self._api_key = (api_key or "").strip()
+        self._model_name = (model_name or "gemini-3.5-flash").strip() or "gemini-3.5-flash"
         if not self._api_key:
             raise ChatConfigError("GEMINI_API_KEY is missing")
         genai.configure(api_key=self._api_key)
@@ -35,7 +36,7 @@ class GeminiChatAdapter:
             "max_output_tokens": 8192,
         }
         self._model = genai.GenerativeModel(
-            model_name=model_name,
+            model_name=self._model_name,
             generation_config=generation_config,
             safety_settings=self.SAFETY_SETTINGS,
         )
@@ -43,6 +44,10 @@ class GeminiChatAdapter:
         self._current_prompt = initial_prompt
         history = [{"role": "user", "parts": [initial_prompt]}]
         self._chat = self._model.start_chat(history=history)
+
+    @property
+    def model_name(self) -> str:
+        return self._model_name
 
     @property
     def current_prompt(self) -> str:
@@ -107,8 +112,9 @@ class GeminiChatAdapter:
     @staticmethod
     def model_user_message() -> str:
         return (
-            "Geminiのモデルが利用できないようです（廃止・名称変更の可能性）。"
-            "ボット側のモデル設定を更新して再デプロイが必要です。"
+            "Geminiのモデルが利用できないようです（廃止・名称変更・新規キー制限の可能性）。"
+            "Koyebの環境変数 `GEMINI_MODEL` を "
+            "`gemini-3.5-flash` や `gemini-3.1-flash-lite` に変更して再デプロイしてください。"
         )
 
     @staticmethod

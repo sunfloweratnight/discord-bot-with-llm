@@ -43,7 +43,7 @@ It is designed for **one guild** (`GUILD_ID`). **Production hosting is on [Koyeb
 |-------|--------|
 | Language | Python 3.11 |
 | Discord | `discord.py` ~= 2.3 (prefix `!` + app/slash commands) |
-| LLM | Google Generative AI — model `gemini-2.5-flash` |
+| LLM | Google Generative AI — default model `gemini-3.5-flash` (`GEMINI_MODEL` で上書き可) |
 | Config | `pydantic-settings` from `.env` |
 | Keep-alive | Flask on `0.0.0.0:8080` |
 | Hosting | **Koyeb** (primary); Render legacy suspended |
@@ -141,6 +141,7 @@ Defined in `Config.Settings` (loaded from `.env`):
 |----------|---------|
 | `DISCORD_API_KEY` | Bot token |
 | `GEMINI_API_KEY` | Google Generative AI |
+| `GEMINI_MODEL` | 任意。既定 `gemini-3.5-flash`。新規キーで 2.5 が 404 のときはこのまま、だめなら `gemini-3.1-flash-lite` |
 | `TYPESAFE_API_KEY` | TypeSafe Jev（`!運勢`）。未設定でも起動可。コマンド実行時に日本語エラー |
 | `OPENAI_API_KEY` | Present in settings; **not used** by current Gemini path |
 | `INITIAL_PROMPT` | System-style seed for Gemini chat history |
