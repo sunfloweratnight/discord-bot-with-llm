@@ -33,7 +33,6 @@ class Fortune(commands.Cog):
 
     @commands.command(name="運勢", aliases=["fortune"])
     @commands.guild_only()
-    @commands.has_any_role("Parent", "Toddler")
     async def fortune(self, ctx: commands.Context, *args):
         """直近の発言から今日の運勢を占います。"""
         note = sanitize_args(args)
@@ -120,9 +119,6 @@ class Fortune(commands.Cog):
 
     @fortune.error
     async def fortune_error(self, ctx: commands.Context, error: Exception):
-        if isinstance(error, commands.MissingAnyRole):
-            await ctx.reply("このコマンドは Parent または Toddler ロールが必要です。")
-            return
         if isinstance(error, commands.NoPrivateMessage):
             await ctx.reply("このコマンドはサーバー内でのみ使えます。")
             return

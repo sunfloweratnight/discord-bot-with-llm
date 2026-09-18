@@ -314,9 +314,9 @@ Documented so agents do not “rediscover” them as mysteries:
 
 ## 12. Quick command cheat sheet
 
-**Anyone:** `!help_command`
+**Anyone:** `!help_command`, `!運勢` / `!fortune`
 
-**Parent / Toddler:** `!gem`, `!運勢` / `!fortune`, `!save_message`, `!get_messages`, `!set_history_limit`
+**Parent / Toddler:** `!gem`, `!save_message`, `!get_messages`, `!set_history_limit`
 
 **Parent:** periodic check controls, channel/permission sync, `!check_infant`, `!discuss_topic`, `!purge_user`, prompt show/set/reset (guild)
 
@@ -337,7 +337,7 @@ Documented so agents do not “rediscover” them as mysteries:
 |-------|----------|
 | Trigger | Prefix only: `!運勢` and `!fortune` (aliases). **Not** every `@bot` mention. |
 | Existing Gemini chat | Unchanged (`@bot` / `!gem` stay free-form chat). |
-| Who can run | `Parent` or `Toddler` (same as `!gem`). Infants: friendly deny or ignore. |
+| Who can run | **Anyone** in the guild (no role gate). Guild-only (not DM). |
 | Message sample | **Current channel only.** Last **10** messages by the invoking author (exclude bots, empty content). Oldest→newest in `state`. |
 | If fewer than 10 | Use whatever exists (min 1). If **0** usable messages → reply that there is not enough speech history; do not call Jev. |
 | Decision engine | **TypeSafe Jev** (`jev-latest`) via `POST https://api.typesafe.ai/v1/systemone` or `typesafe-sdk`. |
