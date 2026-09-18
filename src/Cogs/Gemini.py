@@ -242,6 +242,35 @@ class Gemini(commands.Cog):
                 # 返信できない場合は通常のメッセージとして送信
                 await channel.send("申し訳ありません。メッセージの処理中にエラーが発生しました。")
 
+    @staticmethod
+    def _is_api_key_error(error: Exception) -> bool:
+        text = str(error).lower()
+        markers = (
+            "api_key_invalid",
+            "api key not valid",
+            "invalid api key",
+            "api key expired",
+        )
+        return any(marker in text for marker in markers)
+
+    @staticmethod
+    def _api_key_user_message() -> str:
+        return (
+            "GeminiのAPIキーが無効か期限切れのようです。"
+            "デプロイ先（Koyeb）の環境変数 `GEMINI_API_KEY` を有効なキーに更新して、"
+            "サービスを再デプロイしてください。"
+        )
+
+    def _user_facing_gemini_error(self, error: Exception, *, exhausted_retries: bool = False) -> str:
+        if self._is_api_key_error(error):
+            return self._api_key_user_message()
+        if exhausted_retries:
+            return (
+                "申し訳ありません。AIへの接続に何度か失敗しました。"
+                "しばらく待ってからもう一度試してください。"
+            )
+        return "申し訳ありません。応答の生成中にエラーが発生しました。"
+
     async def send_chat_message(self, msg):
         """Asynchronously send a message to the chat with retry logic"""
         max_attempts = 3
@@ -254,12 +283,18 @@ class Gemini(commands.Cog):
                 return response
             except asyncio.TimeoutError:
                 if attempt == max_attempts:
-                    return f"Timeout error: The request took too long to complete after {max_attempts} attempts."
+                    return (
+                        "申し訳ありません。AIの応答が時間内に返りませんでした。"
+                        "しばらく待ってからもう一度試してください。"
+                    )
                 await asyncio.sleep(1)  # Add delay between retries
             except Exception as e:
-                if attempt == max_attempts:
-                    self.logger.error(f"Error in send_chat_message: {str(e)}")
-                    return f"An error occurred after {max_attempts} attempts: {str(e)}"
+                self.logger.error(f"Error in send_chat_message (attempt {attempt}): {str(e)}")
+                # Invalid credentials will not succeed on retry
+                if self._is_api_key_error(e) or attempt == max_attempts:
+                    return self._user_facing_gemini_error(
+                        e, exhausted_retries=(attempt == max_attempts)
+                    )
                 await asyncio.sleep(1)
 
     async def _generate_response(self, prompt: str) -> str:
@@ -273,7 +308,7 @@ class Gemini(commands.Cog):
             return response.text if hasattr(response, 'text') else str(response)
         except Exception as e:
             self.logger.error(f"Error in _generate_response: {str(e)}")
-            return "申し訳ありません。応答の生成中にエラーが発生しました。"
+            return self._user_facing_gemini_error(e)
 
     @commands.command()
     @commands.has_role("Parent")
